@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.1
+// @version      3.1.1
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker
 // @author       Denmar
 // @license      MIT
