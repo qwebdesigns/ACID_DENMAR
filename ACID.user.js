@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      1.2
+// @version      1.3
 // @description  CWP ACID perks
 // @author       Denmar
 // @license      MIT
@@ -33,7 +33,7 @@
                 const formattedHours = hours.toString().padStart(2, '0');
 
                 span.textContent = `[${formattedHours}:${minutes}:${seconds}]`;
-                span.style.setProperty('font-size', '65%', 'important');
+                span.style.setProperty('font-size', '165%', 'important');
                 span.setAttribute('data-timezone-updated', 'true');
             }
         }
