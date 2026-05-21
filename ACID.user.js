@@ -4,6 +4,7 @@
 // @version      1.0
 // @description  CWP ACID perks
 // @author       Marro Denitsia
+// @license      MIT
 // @match        *://chatwoot.echelon.su/*
 // @match        *://echelon.su/api/dashboard/*
 // @updateURL    https://openuserjs.org/meta/Denmar/Chatwoot_Timezone_Converter.meta.js
