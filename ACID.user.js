@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.0
+// @version      3.1
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker
 // @author       Denmar
 // @license      MIT
@@ -29,11 +29,31 @@
             this.defaultSettings = {
                 timeConverter: true,
                 ticketTracker: true,
-                customValue: 'Текст'
+                addressPanel: true,
+                customValue: ''
             };
             this.settings = this.loadSettings();
             this.intervals = {};
             this.observers = {};
+
+            // База данных регионов
+            this.addressRegions = {
+                "SG": {
+                    name: "Singapore",
+                    bbox: "1.23, 103.60, 1.47, 104.05",
+                    defaultCity: "Southern Islands",
+                    names: ["Wei", "Jian", "Sarah", "Michael", "Chloe", "David", "Xin", "Lucas", "Emma", "Jun", "Ming", "Li", "Yan", "Hong", "Feng", "Ryan", "Rachel", "Ethan", "Grace", "Noah", "Olivia", "Matthew", "Sophia", "Benjamin", "Isabella", "Ahmad", "Siti", "Priya", "Arjun"],
+                    surnames: ["Tan", "Lim", "Lee", "Ng", "Ong", "Wong", "Goh", "Chua", "Chan", "Koh", "Teo", "Yeo", "Loh", "Sim", "Wee", "Foo", "Yap", "Heng", "Low", "Chew", "Pang", "Seet", "Kee", "Ho", "Liang", "Phua", "Tay", "Yip", "Lam", "Kwan"]
+                },
+                "EE": {
+                    name: "Estonia",
+                    bbox: "57.5, 21.7, 59.7, 28.2",
+                    defaultCity: "Tallinn",
+                    names: ["Marko", "Martin", "Anna", "Laura", "Rasmus", "Kristjan", "Kadri", "Liis", "Andres", "Kaja", "Toomas", "Jaan", "Peeter", "Mari", "Tiina", "Kati", "Katrin", "Merike", "Riina", "Siim", "Tarmo", "Ülle", "Ene", "Piret", "Rein", "Jüri", "Aavo", "Kaido", "Margus", "Eve"],
+                    surnames: ["Tamm", "Saar", "Mägi", "Sepp", "Kask", "Koppel", "Rebane", "Ilves", "Pärn", "Kukk", "Karu", "Raud", "Sild", "Oja", "Kivi", "Lepp", "Kuusk", "Rääk", "Vaher", "Luik", "Sarapuu", "Kallas", "Aas", "Lõhmus", "Rand", "Kivimägi", "Tomson", "Jõesaar", "Nõmm", "Paju"]
+                }
+            };
+            this.currentAddress = null;
         }
 
         // --- ИНИЦИАЛИЗАЦИЯ ---
@@ -306,12 +326,20 @@
 
                     <div style="display: flex; flex-direction: column; gap: 0.5vh;">
                         <label style="font-size: 0.75vw; color: #64748b;">Кастомное значение</label>
-                        <input type="text" id="acid-text-val" value="${this.settings.customValue}" style="
+                        <input type="text" id="acid-text-val" value="${this.settings.customValue || ''}" style="
                             background: rgba(0, 0, 0, 0.2); border: 0.1vw solid rgba(255, 255, 255, 0.08);
                             color: #f8fafc; padding: 0.8vh 0.8vw; border-radius: 0.5vw; font-size: 0.9vw; outline: none;
                             transition: border-color 0.2s;
                         " onfocus="this.style.borderColor='#b3e600'" onblur="this.style.borderColor='rgba(255, 255, 255, 0.08)'">
                     </div>
+
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                        <span>Панель генерации адресов</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.addressPanel ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-addr-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.addressPanel ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.addressPanel ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-addr-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-addr" style="display: none;" ${this.settings.addressPanel ? 'checked' : ''}>
+                    </label>
                 </div>
 
                 <button id="acid-save-btn" style="
@@ -343,7 +371,7 @@
 
             bindToggle('acid-t-time', 'acid-t-time-bg', 'acid-t-time-dot');
             bindToggle('acid-t-tracker', 'acid-t-tracker-bg', 'acid-t-tracker-dot');
-
+            bindToggle('acid-t-addr', 'acid-t-addr-bg', 'acid-t-addr-dot');
             const closeModal = () => {
                 overlay.style.opacity = '0';
                 modal.style.transform = 'scale(0.95)';
@@ -356,7 +384,8 @@
                 this.saveSettings({
                     timeConverter: document.getElementById('acid-t-time').checked,
                     ticketTracker: document.getElementById('acid-t-tracker').checked,
-                    customValue: document.getElementById('acid-text-val').value
+                    addressPanel: document.getElementById('acid-t-addr').checked,
+                    customValue: document.getElementById('acid-text-val').value || ''
                 });
                 const btn = document.getElementById('acid-save-btn');
                 btn.textContent = 'Сохранено';
@@ -365,9 +394,206 @@
             });
         }
 
+
+
+        // --- ФУНКЦИЯ 5: Панель случайных адресов ---
+        featureAddressPanel() {
+            if (!this.settings.addressPanel) return;
+            if (document.getElementById('acid-address-panel')) return;
+
+            // Ищем главное меню навигации (левый сайдбар)
+            const navList = document.querySelector('nav.overflow-y-scroll > ul.flex-col');
+            if (!navList) return;
+
+            const panelHtml = document.createElement('li');
+            panelHtml.id = 'acid-address-panel';
+            panelHtml.className = 'grid gap-1 text-sm select-none min-w-0 mt-2';
+            panelHtml.innerHTML = `
+                <div class="flex items-center gap-2 px-1.5 py-1 rounded-lg h-8 min-w-0 text-n-slate-11 hover:bg-n-alpha-2 cursor-pointer transition-colors" id="acid-addr-header">
+                    <div class="relative flex items-center gap-2">
+                        <span style="font-size: 1vw; color: #b3e600;">🌍</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 flex-grow min-w-0 flex-1">
+                        <span class="truncate text-body-main font-medium text-sm">Биллинг Адреса</span>
+                    </div>
+                    <span class="i-lucide-chevron-down size-3 transition-transform" id="acid-addr-icon"></span>
+                </div>
+                <ul id="acid-addr-body" class="grid m-0 list-none min-w-0 p-2 gap-2 rounded-lg" style="display: none; background: rgba(28, 31, 35, 0.95); border: 0.1vw solid rgba(179, 230, 0, 0.2);">
+                    <select id="acid-addr-country" style="background: rgba(0,0,0,0.3); color: #e2e8f0; border: 0.1vw solid rgba(255,255,255,0.1); border-radius: 0.5vw; padding: 0.5vh; outline: none; font-size: 0.8vw; cursor: pointer;">
+                        <option value="SG">Singapore</option>
+                        <option value="EE">Estonia</option>
+                    </select>
+                    <div style="font-family: monospace; font-size: 0.75vw; color: #cbd5e1; display: flex; flex-direction: column; gap: 0.5vh; background: rgba(0,0,0,0.2); padding: 1vh; border-radius: 0.5vw;" id="acid-addr-data">
+                        Загрузка базы...
+                    </div>
+                    <div class="flex gap-2 mt-1">
+                        <button id="acid-addr-reroll" style="flex: 1; background: rgba(255,255,255,0.05); color: #cbd5e1; border-radius: 0.5vw; padding: 0.5vh; font-size: 0.8vw; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">Реролл</button>
+                        <button id="acid-addr-copy" style="flex: 1; background: #b3e600; color: #111827; border-radius: 0.5vw; padding: 0.5vh; font-size: 0.8vw; font-weight: 500; transition: 0.2s;" onmouseover="this.style.opacity='0.8'" onmouseout="this.style.opacity='1'">Скопировать</button>
+                    </div>
+                </ul>
+            `;
+
+            navList.appendChild(panelHtml);
+
+            // Логика UI аккордеона
+            const header = document.getElementById('acid-addr-header');
+            const body = document.getElementById('acid-addr-body');
+            const icon = document.getElementById('acid-addr-icon');
+
+            header.addEventListener('click', () => {
+                const isHidden = body.style.display === 'none';
+                body.style.display = isHidden ? 'grid' : 'none';
+                icon.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
+                if (isHidden && !this.currentAddress) this.fetchAndRollAddress('SG');
+            });
+
+            // Бинды кнопок
+            document.getElementById('acid-addr-country').addEventListener('change', (e) => this.fetchAndRollAddress(e.target.value));
+            document.getElementById('acid-addr-reroll').addEventListener('click', () => {
+                const code = document.getElementById('acid-addr-country').value;
+                this.fetchAndRollAddress(code, true);
+            });
+            document.getElementById('acid-addr-copy').addEventListener('click', () => this.copyAddressToClipboard());
+        }
+
+        async fetchAndRollAddress(countryCode, forceReroll = false) {
+            const dataBox = document.getElementById('acid-addr-data');
+
+            // Проверка кэша (3 часа)
+            const cacheKey = `acid_addresses_${countryCode}`;
+            let cachedData = null;
+            try {
+                const raw = localStorage.getItem(cacheKey);
+                cachedData = raw ? JSON.parse(raw) : null;
+            } catch (e) {
+                cachedData = null;
+            }
+            const now = Date.now();
+            let houses = [];
+
+            if (cachedData && (now - cachedData.timestamp < 3 * 60 * 60 * 1000)) {
+                houses = cachedData.houses;
+            } else {
+                dataBox.innerHTML = 'Загрузка с Overpass API...';
+                document.getElementById('acid-addr-reroll').disabled = true;
+
+                const region = this.addressRegions[countryCode];
+                const query = `[out:json][timeout:25];(node["addr:housenumber"]["addr:street"](${region.bbox});way["addr:housenumber"]["addr:street"](${region.bbox}););out center 1500;`;
+
+                try {
+                    const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
+                    const data = await res.json();
+                    houses = data.elements.map(el => {
+                        const tags = el.tags || {};
+                        return {
+                            street: `${tags['addr:housenumber'] || ''} ${tags['addr:street'] || ''}`.trim(),
+                            city: tags['addr:city'] || tags['addr:suburb'] || tags['addr:neighbourhood'] || region.defaultCity,
+                            zip: tags['addr:postcode'] || ''
+                        };
+                    });
+
+                    localStorage.setItem(cacheKey, JSON.stringify({
+                        timestamp: now,
+                        houses: houses
+                    }));
+                } catch (e) {
+                    dataBox.innerHTML = '<span style="color: #ef4444;">Ошибка API</span>';
+                    document.getElementById('acid-addr-reroll').disabled = false;
+                    return;
+                }
+            }
+
+            document.getElementById('acid-addr-reroll').disabled = false;
+
+            // Жесткая проверка на наличие всех данных (Реррол до победного)
+            let validHouse = null;
+            let attempts = 0;
+            while (!validHouse && attempts < 50) {
+                const random = houses[Math.floor(Math.random() * houses.length)];
+                if (random && random.street.length > 3 && random.zip && random.zip !== '00000') {
+                    validHouse = random;
+                }
+                attempts++;
+            }
+
+            if (!validHouse) {
+                dataBox.innerHTML = '<span style="color: #ef4444;">Нет полных адресов. Смените страну.</span>';
+                return;
+            }
+
+            const r = this.addressRegions[countryCode];
+            const fullName = `${r.names[Math.floor(Math.random() * r.names.length)]} ${r.surnames[Math.floor(Math.random() * r.surnames.length)]}`;
+
+            this.currentAddress = {
+                fullname: fullName,
+                street: validHouse.street,
+                city: validHouse.city,
+                zip: validHouse.zip,
+                country: r.name
+            };
+
+            dataBox.innerHTML = `
+                <div><span style="color:#64748b;">Имя:</span> <span style="color:#fff;">${this.currentAddress.fullname}</span></div>
+                <div><span style="color:#64748b;">Улица:</span> <span style="color:#fff;">${this.currentAddress.street}</span></div>
+                <div><span style="color:#64748b;">Город:</span> <span style="color:#fff;">${this.currentAddress.city}</span></div>
+                <div><span style="color:#64748b;">Индекс:</span> <span style="color:#fff;">${this.currentAddress.zip}</span></div>
+                <div><span style="color:#64748b;">Страна:</span> <span style="color:#fff;">${this.currentAddress.country}</span></div>
+            `;
+        }
+
+        copyAddressToClipboard() {
+            if (!this.currentAddress) return;
+            const a = this.currentAddress;
+            const text = `Имя и фамилия: ${a.fullname}\nУлица: ${a.street}\nГород: ${a.city}\nИндекс: ${a.zip}\nСтрана: ${a.country}`;
+
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = document.getElementById('acid-addr-copy');
+                btn.textContent = 'Успешно!';
+                btn.style.background = '#fff';
+                setTimeout(() => {
+                    btn.textContent = 'Скопировать';
+                    btn.style.background = '#b3e600';
+                }, 1500);
+            });
+        }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
         // --- УПРАВЛЕНИЕ ---
         setupObservers() {
-            this.observers.menu = new MutationObserver(() => this.featureMenuInjector());
+            this.observers.menu = new MutationObserver(() => {
+                this.featureMenuInjector();
+                this.featureAddressPanel();
+            });
             this.observers.menu.observe(document.body, {
                 childList: true,
                 subtree: true
