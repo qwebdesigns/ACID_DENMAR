@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  CWP ACID perks with OOP and Settings
+// @version      3.0
+// @description  CWP ACID perks with OOP, Settings and Ticket Tracker
 // @author       Denmar
 // @license      MIT
 // @match        *://chatwoot.echelon.su/*
@@ -28,6 +28,7 @@
         constructor() {
             this.defaultSettings = {
                 timeConverter: true,
+                ticketTracker: true,
                 customValue: 'Текст'
             };
             this.settings = this.loadSettings();
@@ -35,14 +36,15 @@
             this.observers = {};
         }
 
+        // --- ИНИЦИАЛИЗАЦИЯ ---
         init() {
+            this.injectStyles();
             this.setupObservers();
             this.startIntervalTasks();
             this.runOnLoadTasks();
         }
 
         loadSettings() {
-            // Теперь можно использовать GM_getValue, но для совместимости оставим localStorage
             const saved = localStorage.getItem('acidSettings');
             return saved ? JSON.parse(saved) : this.defaultSettings;
         }
@@ -52,6 +54,51 @@
             localStorage.setItem('acidSettings', JSON.stringify(this.settings));
         }
 
+        injectStyles() {
+            const style = document.createElement('style');
+            style.textContent = `
+                .bg-prog {
+                    position: absolute; top: 0; left: 0; bottom: 0; z-index: 0; pointer-events: none;
+                }
+                .bot-prog {
+                    position: absolute; bottom: 0.5vh; left: 1vw; height: 0.4vh; border-radius: 0.2vw; z-index: 1; pointer-events: none;
+                    display: none;
+                }
+                .snow-icon { font-size: 1.5vw; }
+                
+                @keyframes clientWait {
+                    0%   { width: 100%; background-color: hsla(120, 100%, 40%, 0.25); }
+                    100% { width: 0%;   background-color: hsla(0, 100%, 40%, 0.25); }
+                }
+                .t-client-wait .bg-prog { animation: clientWait 300s linear forwards; }
+                .t-client-expired .bg-prog { width: 100%; background-color: rgba(239, 68, 68, 0.25); }
+
+                .t-agent-wait .bg-prog { width: 100%; background-color: rgba(14, 165, 233, 0.1); }
+                @keyframes agentWait {
+                    0%   { width: calc(100% - 2vw); }
+                    100% { width: 0%; }
+                }
+                .t-agent-wait .bot-prog {
+                    display: block; background-color: rgba(14, 165, 233, 0.6); animation: agentWait 1800s linear forwards;
+                }
+                .t-agent-expired .bg-prog { width: 100%; background-color: rgba(100, 116, 139, 0.15); }
+            `;
+            document.head.appendChild(style);
+        }
+
+        parseSeconds(timeStr) {
+            if (!timeStr || timeStr.includes('now')) return 0;
+            const match = timeStr.match(/(\d+)([a-z]+)/);
+            if (!match) return 0;
+            const val = parseInt(match[1]);
+            const unit = match[2];
+            if (unit === 'm') return val * 60;
+            if (unit === 'h') return val * 3600;
+            if (unit === 'd') return val * 86400;
+            return val;
+        }
+
+        // --- ФУНКЦИЯ 1: Конвертер времени ---
         featureTimeConverter() {
             if (!this.settings.timeConverter) return;
 
@@ -77,6 +124,99 @@
             }
         }
 
+        // --- ФУНКЦИЯ 2: Трекер тикетов ---
+        featureTicketTracker() {
+            if (!this.settings.ticketTracker) {
+                // Очистка при выключении
+                document.querySelectorAll('.bg-prog, .bot-prog').forEach(el => el.remove());
+                document.querySelectorAll('.conversation').forEach(conv => {
+                    conv.classList.remove('t-client-wait', 't-client-expired', 't-agent-wait', 't-agent-expired');
+                });
+                return;
+            }
+
+            const conversations = document.querySelectorAll('.conversation');
+
+            for (const conv of conversations) {
+                const timeContainer = conv.querySelector('.v-popper--has-tooltip span');
+                const msgContainer = conv.querySelector('.leading-6.h-6');
+                if (!timeContainer || !msgContainer) continue;
+
+                const timeText = timeContainer.textContent;
+                const isAgent = msgContainer.innerHTML.includes('M9.277 16.221');
+
+                const stateHash = timeText + '|' + isAgent;
+                if (conv.dataset.stateHash === stateHash) continue;
+                conv.dataset.stateHash = stateHash;
+
+                const parts = timeText.split('•').map(s => s.trim());
+                const lastActiveStr = parts.length > 1 ? parts[1] : parts[0];
+                const elapsedSec = this.parseSeconds(lastActiveStr);
+
+                let bgProg = conv.querySelector('.bg-prog');
+                if (!bgProg) {
+                    bgProg = document.createElement('div');
+                    bgProg.className = 'bg-prog';
+                    conv.insertBefore(bgProg, conv.firstChild);
+                }
+
+                let botProg = conv.querySelector('.bot-prog');
+                if (!botProg) {
+                    botProg = document.createElement('div');
+                    botProg.className = 'bot-prog';
+                    conv.appendChild(botProg);
+                }
+
+                Array.from(conv.children).forEach(child => {
+                    if (!child.classList.contains('bg-prog') && !child.classList.contains('bot-prog')) {
+                        child.style.position = 'relative';
+                        child.style.zIndex = '2';
+                    }
+                });
+
+                const avatarContainer = conv.querySelector('span[role="img"]');
+                let avatarImg = avatarContainer ? avatarContainer.querySelector('img, span.select-none') : null;
+                let snowIcon = conv.querySelector('.snow-icon');
+
+                if (avatarImg) avatarImg.style.display = '';
+                if (snowIcon) snowIcon.style.display = 'none';
+
+                conv.classList.remove('t-client-wait', 't-client-expired', 't-agent-wait', 't-agent-expired');
+                bgProg.style.animation = 'none';
+                botProg.style.animation = 'none';
+                void bgProg.offsetWidth;
+                bgProg.style.animation = '';
+                botProg.style.animation = '';
+
+                if (!isAgent) {
+                    if (elapsedSec >= 300) {
+                        conv.classList.add('t-client-expired');
+                    } else {
+                        conv.classList.add('t-client-wait');
+                        bgProg.style.animationDelay = `-${elapsedSec}s`;
+                    }
+                } else {
+                    if (elapsedSec >= 1800) {
+                        conv.classList.add('t-agent-expired');
+                        if (avatarImg) avatarImg.style.display = 'none';
+
+                        if (!snowIcon && avatarContainer) {
+                            snowIcon = document.createElement('div');
+                            snowIcon.className = 'snow-icon absolute inset-0 flex items-center justify-center z-20';
+                            snowIcon.innerHTML = '❄️';
+                            avatarContainer.appendChild(snowIcon);
+                        } else if (snowIcon) {
+                            snowIcon.style.display = 'flex';
+                        }
+                    } else {
+                        conv.classList.add('t-agent-wait');
+                        botProg.style.animationDelay = `-${elapsedSec}s`;
+                    }
+                }
+            }
+        }
+
+        // --- ФУНКЦИЯ 3: Внедрение кнопки меню ---
         featureMenuInjector() {
             if (document.getElementById('acid-settings-btn')) return;
 
@@ -116,6 +256,7 @@
             }
         }
 
+        // --- ФУНКЦИЯ 4: Панель настроек ---
         openSettingsPanel() {
             if (document.getElementById('acid-modal-overlay')) return;
 
@@ -146,6 +287,7 @@
                 </div>
                 
                 <div style="display: flex; flex-direction: column; gap: 2vh;">
+                    
                     <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
                         <span>Конвертер времени (МСК)</span>
                         <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.timeConverter ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-time-bg">
@@ -154,8 +296,16 @@
                         <input type="checkbox" id="acid-t-time" style="display: none;" ${this.settings.timeConverter ? 'checked' : ''}>
                     </label>
 
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                        <span>Трекер тикетов (Таймеры)</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.ticketTracker ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-tracker-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.ticketTracker ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.ticketTracker ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-tracker-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-tracker" style="display: none;" ${this.settings.ticketTracker ? 'checked' : ''}>
+                    </label>
+
                     <div style="display: flex; flex-direction: column; gap: 0.5vh;">
-                        <label style="font-size: 0.75vw; color: #64748b;">Пример поля</label>
+                        <label style="font-size: 0.75vw; color: #64748b;">Кастомное значение</label>
                         <input type="text" id="acid-text-val" value="${this.settings.customValue}" style="
                             background: rgba(0, 0, 0, 0.2); border: 0.1vw solid rgba(255, 255, 255, 0.08);
                             color: #f8fafc; padding: 0.8vh 0.8vw; border-radius: 0.5vw; font-size: 0.9vw; outline: none;
@@ -179,15 +329,20 @@
                 modal.style.transform = 'scale(1)';
             });
 
-            const timeCheck = document.getElementById('acid-t-time');
-            const timeBg = document.getElementById('acid-t-time-bg');
-            const timeDot = document.getElementById('acid-t-time-dot');
+            // Логика UI
+            const bindToggle = (inputId, bgId, dotId) => {
+                const check = document.getElementById(inputId);
+                const bg = document.getElementById(bgId);
+                const dot = document.getElementById(dotId);
+                check.addEventListener('change', (e) => {
+                    bg.style.background = e.target.checked ? '#b3e600' : 'rgba(255,255,255,0.1)';
+                    dot.style.left = e.target.checked ? '1.45vw' : '0.15vw';
+                    dot.style.background = e.target.checked ? '#111827' : '#94a3b8';
+                });
+            };
 
-            timeCheck.addEventListener('change', (e) => {
-                timeBg.style.background = e.target.checked ? '#b3e600' : 'rgba(255,255,255,0.1)';
-                timeDot.style.left = e.target.checked ? '1.45vw' : '0.15vw';
-                timeDot.style.background = e.target.checked ? '#111827' : '#94a3b8';
-            });
+            bindToggle('acid-t-time', 'acid-t-time-bg', 'acid-t-time-dot');
+            bindToggle('acid-t-tracker', 'acid-t-tracker-bg', 'acid-t-tracker-dot');
 
             const closeModal = () => {
                 overlay.style.opacity = '0';
@@ -199,7 +354,8 @@
 
             document.getElementById('acid-save-btn').addEventListener('click', () => {
                 this.saveSettings({
-                    timeConverter: timeCheck.checked,
+                    timeConverter: document.getElementById('acid-t-time').checked,
+                    ticketTracker: document.getElementById('acid-t-tracker').checked,
                     customValue: document.getElementById('acid-text-val').value
                 });
                 const btn = document.getElementById('acid-save-btn');
@@ -209,6 +365,7 @@
             });
         }
 
+        // --- УПРАВЛЕНИЕ ---
         setupObservers() {
             this.observers.menu = new MutationObserver(() => this.featureMenuInjector());
             this.observers.menu.observe(document.body, {
@@ -219,10 +376,11 @@
 
         startIntervalTasks() {
             this.intervals.timeConverter = setInterval(() => this.featureTimeConverter(), 500);
+            this.intervals.ticketTracker = setInterval(() => this.featureTicketTracker(), 1000);
         }
 
         runOnLoadTasks() {
-            console.log("ACID CW PERKS: Загружено. Настройки:", this.settings);
+            console.log("ACID CW PERKS: Модули загружены.");
         }
     }
 
