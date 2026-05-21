@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      1.0
+// @version      1.1
 // @description  CWP ACID perks
 // @author       Marro Denitsia
 // @license      MIT
 // @match        *://chatwoot.echelon.su/*
 // @match        *://echelon.su/api/dashboard/*
-// @updateURL    https://openuserjs.org/meta/Denmar/Chatwoot_Timezone_Converter.meta.js
-// @downloadURL  https://openuserjs.org/install/Denmar/Chatwoot_Timezone_Converter.user.js
+// @updateURL    https://openuserjs.org/meta/Denmar/ACID_CW_PERKS.meta.js
+// @downloadURL  https://openuserjs.org/install/Denmar/ACID_CW_PERKS.user.js
 // @grant        none
 // ==/UserScript==
 
