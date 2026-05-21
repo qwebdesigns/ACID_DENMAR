@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      1.2
 // @description  CWP ACID perks
-// @author       Marro Denitsia
+// @author       Denmar
 // @license      MIT
 // @match        *://chatwoot.echelon.su/*
 // @match        *://echelon.su/api/dashboard/*
