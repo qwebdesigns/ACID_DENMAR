@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      1.1
+// @version      1.2
 // @description  CWP ACID perks
 // @author       Marro Denitsia
 // @license      MIT
