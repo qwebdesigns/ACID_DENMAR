@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.2
+// @version      3.3
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker
 // @author       Denmar
 // @license      MIT
@@ -535,7 +535,7 @@
         copyAddressToClipboard() {
             if (!this.currentAddress) return;
             const a = this.currentAddress;
-            const text = `Имя и фамилия: ${a.fullname}\nУлица: ${a.street}\nГород: ${a.city}\nИндекс: ${a.zip}\nСтрана: ${a.country}`;
+            const text = `Имя и фамилия: ${a.fullname}\nУлица: ${a.street}\nИндекс: ${a.zip}\nСтрана/Город: ${a.country}`;
 
             navigator.clipboard.writeText(text).then(() => {
                 const btn = document.getElementById('acid-addr-copy');
