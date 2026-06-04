@@ -1,11 +1,11 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      3.6
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
-// @match        *://chatwoot.echelon.su/*
+// @match        *://cw.echelon.su/*
 // @match        *://echelon.su/api/dashboard/*
 // @updateURL    https://openuserjs.org/meta/Denmar/ACID_CW_PERKS.meta.js
 // @downloadURL  https://openuserjs.org/install/Denmar/ACID_CW_PERKS.user.js
