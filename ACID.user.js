@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.9
+// @version      3.81
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -293,13 +293,13 @@
                     <button id="acid-close-btn" style="background: none; border: none; color: #64748b; cursor: pointer; font-size: 1.2vw; padding: 0; transition: color 0.2s;" onmouseover="this.style.color='#f8fafc'" onmouseout="this.style.color='#64748b'">&times;</button>
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 2vh;">
-                    <!--<label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
                         <span>Конвертер времени (МСК)</span>
                         <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.timeConverter ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-time-bg">
                             <div style="position: absolute; top: 0.15vw; left: ${this.settings.timeConverter ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.timeConverter ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-time-dot"></div>
                         </div>
                         <input type="checkbox" id="acid-t-time" style="display: none;" ${this.settings.timeConverter ? 'checked' : ''}>
-                    </label>-->
+                    </label>
                     <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
                         <span>Трекер тикетов (Таймеры)</span>
                         <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.ticketTracker ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-tracker-bg">
@@ -657,7 +657,7 @@
         }
 
         startIntervalTasks() {
-            //this.intervals.timeConverter = setInterval(() => this.featureTimeConverter(), 500);
+            this.intervals.timeConverter = setInterval(() => this.featureTimeConverter(), 500);
             this.intervals.ticketTracker = setInterval(() => this.featureTicketTracker(), 1000);
         }
 
