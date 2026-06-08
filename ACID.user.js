@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.7
+// @version      3.8
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -120,10 +120,13 @@
         featureTimeConverter() {
             if (!this.settings.timeConverter) return;
 
-            const spans = document.querySelectorAll('span.font-mono:not([data-timezone-updated="true"])');
+            const spans = document.querySelectorAll('span.font-mono');
 
             for (const span of spans) {
                 const text = span.textContent.trim();
+
+                if (text.includes('[')) continue;
+
                 const timeMatch = text.match(/(\d{1,2}):(\d{2}):(\d{2})/);
 
                 if (timeMatch) {
@@ -136,7 +139,6 @@
 
                     span.textContent = text.replace(timeMatch[0], `[${formattedHours}:${minutes}:${seconds}]`);
                     span.style.setProperty('font-size', '0.8vw', 'important');
-                    span.setAttribute('data-timezone-updated', 'true');
                 }
             }
         }
