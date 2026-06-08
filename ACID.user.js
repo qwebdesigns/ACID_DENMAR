@@ -1,11 +1,12 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.6
+// @version      3.7
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
 // @match        *://cw.echelon.su/*
+// @match        *://cw2.echelon.su/*
 // @match        *://echelon.su/api/dashboard/*
 // @updateURL    https://openuserjs.org/meta/Denmar/ACID_CW_PERKS.meta.js
 // @downloadURL  https://openuserjs.org/install/Denmar/ACID_CW_PERKS.user.js
@@ -67,7 +68,11 @@
 
         loadSettings() {
             const saved = localStorage.getItem('acidSettings');
-            return saved ? JSON.parse(saved) : this.defaultSettings;
+            const parsed = saved ? JSON.parse(saved) : {};
+            return {
+                ...this.defaultSettings,
+                ...parsed
+            };
         }
 
         saveSettings(newSettings) {
@@ -114,19 +119,23 @@
 
         featureTimeConverter() {
             if (!this.settings.timeConverter) return;
-            const spans = document.querySelectorAll('span.font-mono');
+
+            const spans = document.querySelectorAll('span.font-mono:not([data-timezone-updated="true"])');
+
             for (const span of spans) {
-                if (span.getAttribute('data-timezone-updated') === 'true') continue;
                 const text = span.textContent.trim();
-                const timeMatch = text.match(/^(\d{1,2}):(\d{2}):(\d{2})$/);
+                const timeMatch = text.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+
                 if (timeMatch) {
                     let hours = parseInt(timeMatch[1], 10);
                     const minutes = timeMatch[2];
                     const seconds = timeMatch[3];
+
                     hours = (hours + 3) % 24;
                     const formattedHours = hours.toString().padStart(2, '0');
-                    span.textContent = `[${formattedHours}:${minutes}:${seconds}]`;
-                    span.style.setProperty('font-size', '65%', 'important');
+
+                    span.textContent = text.replace(timeMatch[0], `[${formattedHours}:${minutes}:${seconds}]`);
+                    span.style.setProperty('font-size', '0.8vw', 'important');
                     span.setAttribute('data-timezone-updated', 'true');
                 }
             }
