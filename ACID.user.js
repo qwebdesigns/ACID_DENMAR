@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.81
+// @version      3.82
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -294,7 +294,7 @@
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 2vh;">
                     <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
-                        <span>Конвертер времени (МСК)</span>
+                        <span>Конвертер времени (МСК) (disabled)</span>
                         <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.timeConverter ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-time-bg">
                             <div style="position: absolute; top: 0.15vw; left: ${this.settings.timeConverter ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.timeConverter ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-time-dot"></div>
                         </div>
@@ -447,7 +447,7 @@
             const now = Date.now();
             let houses = [];
 
-            if (cachedData && (now - cachedData.timestamp < 3 * 60 * 60 * 1000)) {
+            if (cachedData && (now - cachedData.timestamp < 9993 * 60 * 60 * 1000)) {
                 houses = cachedData.houses;
             } else {
                 dataBox.innerHTML = '<span style="color: #64748b;">Загрузка с Overpass API...</span>';
