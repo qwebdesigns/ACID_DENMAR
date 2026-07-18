@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.82
+// @version      3.88
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
 // @match        *://cw.echelon.su/*
 // @match        *://cw2.echelon.su/*
 // @match        *://echelon.su/api/dashboard/*
+// @match        *://adm2.echelon.su/*
 // @updateURL    https://openuserjs.org/meta/Denmar/ACID_CW_PERKS.meta.js
 // @downloadURL  https://openuserjs.org/install/Denmar/ACID_CW_PERKS.user.js
 // @grant        GM_getValue
@@ -26,13 +27,101 @@
 (function () {
     'use strict';
 
+    // Айфрейм "Рабочая панель" (adm2.echelon.su) — отдельный документ, чужой origin,
+    // поэтому это не метод AcidPerks, а самостоятельный скрипт, выполняющийся прямо внутри
+    // самого iframe. Chatwoot не пересоздаёт iframe при переключении вкладок "Сообщения" /
+    // "Рабочая панель", а только показывает/прячет его через CSS — значит наблюдатель,
+    // однажды запущенный при загрузке iframe, сам ловит все дальнейшие обновления данных
+    // (новые строки логов и т.п.) без необходимости отдельно слушать клик по кнопке.
+    function initDashboardMskConverter() {
+        const TIME_RE = /^([0-2]\d):([0-5]\d):([0-5]\d)$/;
+        const MSK_OFFSET_HOURS = 3;
+
+        function convertSpan(span) {
+            const m = TIME_RE.exec(span.textContent.trim());
+            if (!m) return;
+            const hh = String((parseInt(m[1], 10) + MSK_OFFSET_HOURS) % 24).padStart(2, '0');
+
+            span.dataset.acidMskDone = '1';
+            span.style.display = 'inline-flex';
+            span.style.flexDirection = 'column';
+            span.style.lineHeight = '1.15';
+            span.textContent = '';
+
+            const line1 = document.createElement('span');
+            line1.textContent = `${hh}:${m[2]}:${m[3]}`;
+
+            const line2 = document.createElement('span');
+            line2.textContent = 'мск';
+            line2.style.fontSize = '1em';
+            line2.style.opacity = '0.55';
+
+            span.appendChild(line1);
+            span.appendChild(line2);
+        }
+
+        function scan(root) {
+            const scope = root || document;
+            const candidates = scope.matches && scope.matches('span') ? [scope] : [];
+            candidates.push(...scope.querySelectorAll('span'));
+            candidates.forEach(span => {
+                if (span.children.length > 0) return;
+                if (span.closest('[data-acid-msk-done]')) return;
+                convertSpan(span);
+            });
+        }
+
+        const start = () => {
+            scan();
+            new MutationObserver(mutations => {
+                for (const mut of mutations) {
+                    mut.addedNodes.forEach(node => {
+                        if (node.nodeType === 1) scan(node);
+                    });
+                }
+            }).observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        };
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', start);
+        } else {
+            start();
+        }
+    }
+
+    // Настройки хранятся через GM_setValue/GM_getValue, а не localStorage: последний
+    // изолирован по origin, и adm2.echelon.su (другой домен, где живёт iframe) не увидел бы
+    // localStorage, записанный на cw.echelon.su. GM-хранилище общее для всего скрипта.
+    function loadSharedSettings(defaults) {
+        let parsed = {};
+        try {
+            parsed = JSON.parse(GM_getValue('acidSettings', '{}'));
+        } catch (e) {}
+        return {
+            ...defaults,
+            ...parsed
+        };
+    }
+
+    if (location.hostname === 'adm2.echelon.su') {
+        const settings = loadSharedSettings({
+            mskConverter: true
+        });
+        if (settings.mskConverter) initDashboardMskConverter();
+        return;
+    }
+
     class AcidPerks {
         constructor() {
             this.defaultSettings = {
-                timeConverter: true,
                 ticketTracker: true,
                 addressPanel: true,
                 customHeader: true,
+                rightPanelStyle: true,
+                mskConverter: true,
                 customValue: ''
             };
             this.settings = this.loadSettings();
@@ -41,16 +130,164 @@
 
             this.currentChatData = null;
 
+            // Гео-данные (bbox, город, размер пула) больше не нужны на клиенте — этим занимается
+            // сервер (server/common.php + server/update.php). Здесь остаётся только то, что нужно
+            // самому UI: подпись/флаг/поиск по алиасам и генерация имени по региону.
             this.addressRegions = {
                 "SG": {
                     name: "Singapore",
-                    bbox: "1.23, 103.60, 1.47, 104.05",
-                    defaultCity: "Southern Islands",
-                    names: ["Wei", "Jian", "Sarah", "Michael", "Chloe", "David", "Xin", "Lucas", "Emma", "Jun", "Ming", "Li", "Yan", "Hong", "Feng", "Ryan", "Rachel", "Ethan", "Grace", "Noah", "Olivia", "Matthew", "Sophia", "Benjamin", "Isabella", "Ahmad", "Siti", "Priya", "Arjun"],
-                    surnames: ["Tan", "Lim", "Lee", "Ng", "Ong", "Wong", "Goh", "Chua", "Chan", "Koh", "Teo", "Yeo", "Loh", "Sim", "Wee", "Foo", "Yap", "Heng", "Low", "Chew", "Pang", "Seet", "Kee", "Ho", "Liang", "Phua", "Tay", "Yip", "Lam", "Kwan"]
+                    label: "Сингапур",
+                    flag: "🇸🇬",
+                    favorite: true,
+                    aliases: ["singapore", "sg", "сингапур"],
+                    names: ["Wei", "Jian", "Sarah", "Michael", "Chloe", "David", "Xin", "Lucas", "Emma", "Jun", "Ming", "Li", "Yan", "Hong", "Feng", "Ryan", "Rachel", "Ethan", "Grace", "Noah", "Olivia", "Matthew", "Sophia", "Benjamin", "Isabella", "Ahmad", "Siti", "Priya", "Arjun", "Wen", "Kai", "Jing", "Heai", "Xuan", "Zhi", "Yong", "Hwee", "Choon", "Wan", "Hafiz", "Aisyah", "Nur", "Farah", "Zulkifli", "Rashid", "Kumar", "Raj", "Meera", "Deepa", "Karthik", "Vikram", "Anand", "James", "Daniel", "Nicole", "Amanda", "Jasmine"],
+                    surnames: ["Tan", "Lim", "Lee", "Ng", "Ong", "Wong", "Goh", "Chua", "Chan", "Koh", "Teo", "Yeo", "Loh", "Sim", "Wee", "Foo", "Yap", "Heng", "Low", "Chew", "Pang", "Seet", "Kee", "Ho", "Liang", "Phua", "Tay", "Yip", "Lam", "Kwan", "Neo", "Toh", "Poh", "Boon", "Soh", "Ang", "Cheong", "Quek", "Aw", "Ling"]
+                },
+                "HK": {
+                    name: "Hong Kong",
+                    label: "Гонконг",
+                    flag: "🇭🇰",
+                    favorite: true,
+                    aliases: ["hongkong", "hong kong", "hk", "гонконг"],
+                    names: ["Chun", "Wing", "Hei", "Ka Ho", "Tsz", "Yan", "Ka Yee", "Hoi", "Man", "Lok", "Sze", "Yee", "Cheuk", "Ho Yin", "Ching", "Ka Wai", "Wai Lam", "Tsz Ching", "Yat Long", "Ming"],
+                    surnames: ["Chan", "Wong", "Lee", "Cheung", "Ng", "Lau", "Ho", "Wu", "Chow", "Leung", "Kwok", "Tang", "Yip", "Ma", "Yeung", "Fung", "Kwan", "Lam", "Tsang", "Choi"]
+                },
+                "DE": {
+                    name: "Germany",
+                    label: "Германия",
+                    flag: "🇩🇪",
+                    favorite: true,
+                    aliases: ["germany", "de", "берлин", "berlin", "deutschland"],
+                    names: ["Lukas", "Finn", "Maximilian", "Paul", "Leon", "Jonas", "Felix", "Anna", "Mia", "Emma", "Hannah", "Lena", "Sophie", "Laura", "Ben", "Elias", "Marie", "Julia", "Niklas", "Sarah"],
+                    surnames: ["Müller", "Schmidt", "Schneider", "Fischer", "Weber", "Meyer", "Wagner", "Becker", "Schulz", "Hoffmann", "Koch", "Richter", "Klein", "Wolf", "Neumann", "Schwarz", "Zimmermann", "Braun", "Krüger", "Hartmann"]
+                },
+                "US": {
+                    name: "United States",
+                    label: "США",
+                    flag: "🇺🇸",
+                    favorite: true,
+                    needsState: true,
+                    aliases: ["usa", "us", "america", "сша", "америка", "нью-йорк", "new york", "штаты"],
+                    names: ["James", "John", "Robert", "Michael", "William", "David", "Richard", "Joseph", "Emma", "Olivia", "Ava", "Sophia", "Isabella", "Mia", "Charlotte", "Amelia", "Ethan", "Noah", "Liam", "Grace"],
+                    surnames: ["Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez", "Wilson", "Anderson", "Taylor", "Thomas", "Moore", "Jackson", "Martin", "Lee", "Perez", "White"]
+                },
+                "FR": {
+                    name: "France",
+                    label: "Франция",
+                    flag: "🇫🇷",
+                    aliases: ["france", "fr", "франция", "париж", "paris"],
+                    names: ["Léo", "Louis", "Gabriel", "Jules", "Hugo", "Arthur", "Nathan", "Emma", "Louise", "Chloé", "Camille", "Manon", "Léa", "Inès", "Lucas", "Adam", "Alice", "Jade", "Lina", "Sarah"],
+                    surnames: ["Martin", "Bernard", "Dubois", "Thomas", "Robert", "Petit", "Durand", "Leroy", "Moreau", "Simon", "Laurent", "Lefebvre", "Michel", "Garcia", "Roux", "Vincent", "Fournier", "Girard", "Bonnet", "Morel"]
+                },
+                "NL": {
+                    name: "Netherlands",
+                    label: "Нидерланды",
+                    flag: "🇳🇱",
+                    aliases: ["netherlands", "holland", "nl", "нидерланды", "голландия", "амстердам", "amsterdam"],
+                    names: ["Daan", "Sem", "Milan", "Levi", "Luuk", "Finn", "Julia", "Emma", "Sophie", "Tess", "Sara", "Anna", "Lotte", "Fleur", "Bram", "Noah", "Sanne", "Eva", "Roos", "Mila"],
+                    surnames: ["de Jong", "Jansen", "de Vries", "van den Berg", "van Dijk", "Bakker", "Visser", "Smit", "Meijer", "de Boer", "Mulder", "de Groot", "Bos", "Vos", "Peters", "Hendriks", "van Leeuwen", "Dekker", "Brouwer", "de Wit"]
+                },
+                "GB": {
+                    name: "United Kingdom",
+                    label: "Великобритания",
+                    flag: "🇬🇧",
+                    aliases: ["uk", "britain", "england", "gb", "великобритания", "англия", "лондон", "london"],
+                    names: ["Oliver", "George", "Harry", "Jack", "Charlie", "Jacob", "Freddie", "Olivia", "Amelia", "Isla", "Ava", "Emily", "Sophie", "Grace", "Thomas", "Alfie", "Lily", "Ella", "Poppy", "Jessica"],
+                    surnames: ["Smith", "Jones", "Taylor", "Williams", "Brown", "Davies", "Evans", "Wilson", "Thomas", "Roberts", "Johnson", "Walker", "Wright", "Robinson", "Hughes", "Green", "Hall", "Clarke", "Patel", "Baker"]
+                },
+                "CA": {
+                    name: "Canada",
+                    label: "Канада",
+                    flag: "🇨🇦",
+                    needsState: true,
+                    aliases: ["canada", "ca", "канада", "торонто", "toronto"],
+                    names: ["Liam", "Noah", "William", "Benjamin", "Owen", "Jack", "Emma", "Olivia", "Charlotte", "Amelia", "Ava", "Sophia", "Isabella", "Mia", "Lucas", "Ethan", "Chloe", "Zoe", "Nathan", "Ryan"],
+                    surnames: ["Smith", "Brown", "Tremblay", "Martin", "Roy", "Wilson", "MacDonald", "Gagnon", "Taylor", "Campbell", "Anderson", "Morin", "Clark", "Lee", "Cote", "Bouchard", "Bergeron", "Fortin", "Levesque", "Gauthier"]
+                },
+                "JP": {
+                    name: "Japan",
+                    label: "Япония",
+                    flag: "🇯🇵",
+                    aliases: ["japan", "jp", "япония", "токио", "tokyo"],
+                    names: ["Haruto", "Yuto", "Sota", "Riku", "Ren", "Yui", "Aoi", "Hina", "Sakura", "Yuna", "Rin", "Mio", "Kaito", "Sora", "Yuki", "Hana", "Sota", "Ayaka", "Kenta", "Nao"],
+                    surnames: ["Sato", "Suzuki", "Takahashi", "Tanaka", "Watanabe", "Ito", "Yamamoto", "Nakamura", "Kobayashi", "Kato", "Yoshida", "Yamada", "Sasaki", "Matsumoto", "Inoue", "Kimura", "Hayashi", "Shimizu", "Saito", "Yamaguchi"]
+                },
+                "CH": {
+                    name: "Switzerland",
+                    label: "Швейцария",
+                    flag: "🇨🇭",
+                    aliases: ["switzerland", "ch", "швейцария", "цюрих", "zurich"],
+                    names: ["Noah", "Liam", "Elias", "Matteo", "Luca", "Julien", "Mia", "Emma", "Lena", "Elena", "Sofia", "Lina", "Nora", "Alina", "Leon", "David", "Laura", "Nina", "Simon", "Anna"],
+                    surnames: ["Müller", "Meier", "Schmid", "Keller", "Weber", "Huber", "Schneider", "Meyer", "Steiner", "Fischer", "Gerber", "Brunner", "Baumann", "Frei", "Widmer", "Zimmermann", "Moser", "Graf", "Roth", "Suter"]
+                },
+                "ES": {
+                    name: "Spain",
+                    label: "Испания",
+                    flag: "🇪🇸",
+                    aliases: ["spain", "es", "испания", "мадрид", "madrid"],
+                    names: ["Hugo", "Martín", "Lucas", "Mateo", "Leo", "Daniel", "Lucía", "Sofía", "Martina", "María", "Paula", "Julia", "Valeria", "Emma", "Pablo", "Alejandro", "Carla", "Sara", "Diego", "Marcos"],
+                    surnames: ["García", "Martínez", "López", "Sánchez", "Pérez", "González", "Rodríguez", "Fernández", "Gómez", "Díaz", "Moreno", "Álvarez", "Romero", "Navarro", "Torres", "Ramírez", "Ruiz", "Gil", "Serrano", "Blanco"]
+                },
+                "IT": {
+                    name: "Italy",
+                    label: "Италия",
+                    flag: "🇮🇹",
+                    aliases: ["italy", "it", "италия", "рим", "rome"],
+                    names: ["Leonardo", "Francesco", "Alessandro", "Lorenzo", "Mattia", "Tommaso", "Sofia", "Giulia", "Aurora", "Alice", "Ginevra", "Emma", "Giorgia", "Beatrice", "Andrea", "Marco", "Chiara", "Elena", "Matteo", "Elisa"],
+                    surnames: ["Rossi", "Russo", "Ferrari", "Esposito", "Bianchi", "Romano", "Colombo", "Ricci", "Marino", "Greco", "Bruno", "Gallo", "Conti", "De Luca", "Costa", "Giordano", "Mancini", "Rizzo", "Lombardi", "Moretti"]
+                },
+                "SE": {
+                    name: "Sweden",
+                    label: "Швеция",
+                    flag: "🇸🇪",
+                    aliases: ["sweden", "se", "швеция", "стокгольм", "stockholm"],
+                    names: ["Lucas", "William", "Liam", "Oscar", "Hugo", "Elias", "Alice", "Maja", "Ella", "Wilma", "Alma", "Ebba", "Freja", "Stella", "Axel", "Erik", "Astrid", "Ines", "Leo", "Alva"],
+                    surnames: ["Andersson", "Johansson", "Karlsson", "Nilsson", "Eriksson", "Larsson", "Olsson", "Persson", "Svensson", "Gustafsson", "Pettersson", "Jonsson", "Jansson", "Hansson", "Bengtsson", "Lindberg", "Berg", "Lindqvist", "Lindgren", "Olofsson"]
+                },
+                "AU": {
+                    name: "Australia",
+                    label: "Австралия",
+                    flag: "🇦🇺",
+                    needsState: true,
+                    aliases: ["australia", "au", "австралия", "сидней", "sydney"],
+                    names: ["Oliver", "Jack", "William", "Noah", "Thomas", "James", "Charlotte", "Olivia", "Amelia", "Isla", "Mia", "Grace", "Ava", "Ruby", "Lucas", "Henry", "Chloe", "Ella", "Cooper", "Zoe"],
+                    surnames: ["Smith", "Jones", "Williams", "Brown", "Wilson", "Taylor", "Johnson", "White", "Martin", "Anderson", "Thompson", "Nguyen", "Ryan", "Kelly", "King", "Baker", "Harris", "Young", "Walker", "Robinson"]
+                },
+                "PL": {
+                    name: "Poland",
+                    label: "Польша",
+                    flag: "🇵🇱",
+                    aliases: ["poland", "pl", "польша", "варшава", "warsaw"],
+                    names: ["Jakub", "Antoni", "Jan", "Aleksander", "Franciszek", "Filip", "Zuzanna", "Julia", "Zofia", "Maja", "Hanna", "Amelia", "Lena", "Alicja", "Szymon", "Kacper", "Wiktoria", "Oliwia", "Marcel", "Nikola"],
+                    surnames: ["Nowak", "Kowalski", "Wiśniewski", "Wójcik", "Kowalczyk", "Kamiński", "Lewandowski", "Zieliński", "Szymański", "Woźniak", "Dąbrowski", "Kozłowski", "Jankowski", "Mazur", "Krawczyk", "Piotrowski", "Grabowski", "Nowakowski", "Pawłowski", "Michalski"]
+                },
+                "AE": {
+                    name: "United Arab Emirates",
+                    label: "ОАЭ",
+                    flag: "🇦🇪",
+                    aliases: ["uae", "dubai", "оаэ", "дубай", "эмираты"],
+                    names: ["Mohammed", "Ahmed", "Ali", "Omar", "Khalid", "Hassan", "Fatima", "Aisha", "Maryam", "Sara", "Noora", "Layla", "Huda", "Amal", "Yousef", "Saeed", "Mariam", "Salem", "Rashid", "Alia"],
+                    surnames: ["Al Maktoum", "Al Falasi", "Al Suwaidi", "Al Marri", "Al Shamsi", "Al Zaabi", "Al Ketbi", "Al Hashimi", "Al Qassimi", "Al Mansoori", "Al Ali", "Al Zarooni", "Al Mazrouei", "Al Nuaimi", "Al Blooshi"]
+                },
+                "TR": {
+                    name: "Turkey",
+                    label: "Турция",
+                    flag: "🇹🇷",
+                    aliases: ["turkey", "tr", "турция", "стамбул", "istanbul"],
+                    names: ["Ahmet", "Mehmet", "Mustafa", "Yusuf", "Emre", "Burak", "Ayşe", "Fatma", "Zeynep", "Elif", "Merve", "Esra", "Deniz", "Ece", "Kerem", "Baran", "Selin", "Buse", "Cem", "Aylin"],
+                    surnames: ["Yılmaz", "Kaya", "Demir", "Şahin", "Çelik", "Yıldız", "Yıldırım", "Öztürk", "Aydın", "Özdemir", "Arslan", "Doğan", "Kılıç", "Aslan", "Çetin", "Kara", "Koç", "Kurt", "Özkan", "Şimşek"]
                 }
             };
+            // База адресного сервера (см. server/ в репозитории). Меняй только тут, если переносишь хостинг.
+            this.ADDRESS_SERVER_BASE = "https://gammahub.tech/acid";
             this.currentAddress = null;
+            this.selectedRegionCode = "SG";
+            this.prefetchStarted = false;
+
+            // Кеш свежих данных из API списка тикетов (fetch-перехват), используется
+            // ticket tracker'ом вместо грубого DOM-текста "14m", когда данные ещё не устарели.
+            this.conversationsCache = new Map();
+            this.conversationsCacheTTL = 3 * 60 * 1000;
         }
 
         // Запуск до загрузки страницы
@@ -61,23 +298,24 @@
         // Запуск после рендера DOM
         initDOM() {
             this.injectStyles();
+            this.applyRightPanelClass();
             this.setupObservers();
             this.startIntervalTasks();
             this.runOnLoadTasks();
         }
 
         loadSettings() {
-            const saved = localStorage.getItem('acidSettings');
-            const parsed = saved ? JSON.parse(saved) : {};
-            return {
-                ...this.defaultSettings,
-                ...parsed
-            };
+            return loadSharedSettings(this.defaultSettings);
         }
 
         saveSettings(newSettings) {
             this.settings = newSettings;
-            localStorage.setItem('acidSettings', JSON.stringify(this.settings));
+            GM_setValue('acidSettings', JSON.stringify(this.settings));
+            this.applyRightPanelClass();
+        }
+
+        applyRightPanelClass() {
+            document.documentElement.classList.toggle('acid-rp-style', !!this.settings.rightPanelStyle);
         }
 
         injectStyles() {
@@ -101,6 +339,78 @@
                 }
                 .t-agent-wait .bot-prog { display: block; background-color: rgba(14, 165, 233, 0.6); animation: agentWait 1800s linear forwards; }
                 .t-agent-expired .bg-prog { width: 100%; background-color: rgba(100, 116, 139, 0.15); }
+
+                /* === ACID: правая панель — только компоновка, цвета темы не трогаем === */
+
+                /* панель уже: была 320-360px, делаем компактнее на десктопе (на мобильном drawer'е не трогаем) */
+                @media (min-width: 768px) {
+                    html.acid-rp-style .md\:static:has(.list-group) {
+                        width: 280px !important;
+                        min-width: 280px !important;
+                    }
+                }
+
+                /* компактная сетка контактных данных (email/телефон/id/компания) вместо длинного столбца */
+                html.acid-rp-style div.flex.flex-col.items-start.w-full.gap-2:has([title="Email"]) {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    column-gap: 0.7vw;
+                    row-gap: 0.5vh;
+                }
+
+                /* агент + команда в одну строку, приоритет и категории на всю ширину под ними */
+                html.acid-rp-style .list-group [inbox-id] {
+                    display: grid;
+                    grid-template-columns: 1fr 1fr;
+                    column-gap: 0.6vw;
+                    align-items: start;
+                }
+                html.acid-rp-style .list-group [inbox-id] > .multiselect-wrap--small:nth-of-type(n+3),
+                html.acid-rp-style .list-group [inbox-id] > .overflow-auto.py-0.px-0,
+                html.acid-rp-style .list-group [inbox-id] > .sidebar-labels-wrap {
+                    grid-column: 1 / -1;
+                }
+
+                /* плотнее вертикальный ритм между секциями и их заголовками */
+                .list-group { display: flex; flex-direction: column; gap: 0.5vh; padding: 0 0.3vw; }
+                .list-group .flex.flex-col.gap-3 { gap: 0.5vh; }
+                .list-group .drag-handle { height: 2.4vh; padding-top: 0.35vh; padding-bottom: 0.35vh; }
+                .list-group .drag-handle h5 { font-weight: 600; }
+
+                /* лейблы-теги оборачиваются компактнее, без лишних внешних отступов */
+                .label-wrap { row-gap: 0.35vh; }
+
+                /* карточки прошлых диалогов — компактнее по высоте */
+                .list-group .contact-conversation--list .conversation { padding-top: 0.2vh; padding-bottom: 0.2vh; }
+
+                /* === ACID: панель биллинг-адресов — сжатие до иконки, когда левый рейл узкий,
+                   и непрерывное масштабирование шрифта/отступов под фактическую ширину рейла
+                   (через container query units) в развёрнутом состоянии === */
+                #acid-address-panel {
+                    container-type: inline-size;
+                    --acid-fs-lg: clamp(0.7rem, 9cqw, 0.95rem);
+                    --acid-fs-md: clamp(0.62rem, 7.5cqw, 0.85rem);
+                    --acid-fs-sm: clamp(0.56rem, 6cqw, 0.72rem);
+                    --acid-pad-h: clamp(0.35rem, 5cqw, 0.6rem);
+                    --acid-radius: clamp(0.3rem, 3.5cqw, 0.5rem);
+                    --acid-gap: clamp(0.2rem, 2.5cqw, 0.4rem);
+                }
+                #acid-address-panel .acid-compact-only { display: none; }
+                #acid-address-panel .acid-wide-only { display: flex; }
+                #acid-address-panel.acid-addr-compact .acid-wide-only { display: none !important; }
+                #acid-address-panel.acid-addr-compact .acid-compact-only { display: flex !important; }
+                #acid-addr-body { width: 100%; box-sizing: border-box; z-index: 99998; box-shadow: 0 1vh 3vh rgba(0, 0, 0, 0.5); }
+                /* всплывающая (сжатая) панель вынесена в document.body — фиксированные размеры,
+                   т.к. её ширина (240px) не связана с шириной узкого рейла-триггера */
+                #acid-addr-body.acid-floating {
+                    --acid-fs-lg: 0.85rem;
+                    --acid-fs-md: 0.75rem;
+                    --acid-fs-sm: 0.65rem;
+                    --acid-pad-h: 0.5rem;
+                    --acid-radius: 0.4rem;
+                    --acid-gap: 0.35rem;
+                    width: 240px;
+                }
             `;
             document.head.appendChild(style);
         }
@@ -117,37 +427,14 @@
             return val;
         }
 
-        featureTimeConverter() {
-            if (!this.settings.timeConverter) return;
-
-            const spans = document.querySelectorAll('span.font-mono');
-
-            for (const span of spans) {
-                const text = span.textContent.trim();
-
-                if (text.includes('[')) continue;
-
-                const timeMatch = text.match(/(\d{1,2}):(\d{2}):(\d{2})/);
-
-                if (timeMatch) {
-                    let hours = parseInt(timeMatch[1], 10);
-                    const minutes = timeMatch[2];
-                    const seconds = timeMatch[3];
-
-                    hours = (hours + 3) % 24;
-                    const formattedHours = hours.toString().padStart(2, '0');
-
-                    span.textContent = text.replace(timeMatch[0], `[${formattedHours}:${minutes}:${seconds}]`);
-                    span.style.setProperty('font-size', '0.8vw', 'important');
-                }
-            }
-        }
-
         featureTicketTracker() {
             if (!this.settings.ticketTracker) {
                 document.querySelectorAll('.bg-prog, .bot-prog').forEach(el => el.remove());
                 document.querySelectorAll('.conversation').forEach(conv => {
                     conv.classList.remove('t-client-wait', 't-client-expired', 't-agent-wait', 't-agent-expired');
+                });
+                document.querySelectorAll('.leading-6.h-6 span').forEach(span => {
+                    span.style.color = '';
                 });
                 return;
             }
@@ -159,14 +446,35 @@
                 if (!timeContainer || !msgContainer) continue;
 
                 const timeText = timeContainer.textContent;
-                const isAgent = msgContainer.innerHTML.includes('M9.277 16.221');
-                const stateHash = timeText + '|' + isAgent;
+                const isLocked = msgContainer.innerHTML.includes('M12 2a4 4 0 0 1 4 4v2h1.75');
+                let isAgent = msgContainer.innerHTML.includes('M9.277 16.221');
+
+                const nameEl = conv.querySelector('h4.conversation--user');
+                const previewSpan = msgContainer.querySelector('span');
+                let cached = null;
+                if (nameEl && previewSpan) {
+                    const fingerprint = nameEl.textContent.trim().toLowerCase() + '|' + this.normalizeFingerprintText(previewSpan.textContent);
+                    const entry = this.conversationsCache.get(fingerprint);
+                    if (entry && (Date.now() - entry.fetchedAt) < this.conversationsCacheTTL) {
+                        cached = entry;
+                    }
+                }
+
+                if (previewSpan) previewSpan.style.color = isLocked ? '#eab308' : '';
+
+                const stateHash = timeText + '|' + isAgent + '|' + isLocked + '|' + (cached ? cached.lastActivityAt : '');
                 if (conv.dataset.stateHash === stateHash) continue;
                 conv.dataset.stateHash = stateHash;
 
-                const parts = timeText.split('•').map(s => s.trim());
-                const lastActiveStr = parts.length > 1 ? parts[1] : parts[0];
-                const elapsedSec = this.parseSeconds(lastActiveStr);
+                let elapsedSec;
+                if (cached) {
+                    isAgent = cached.isAgentMessage;
+                    elapsedSec = Math.max(0, Math.floor(Date.now() / 1000) - cached.lastActivityAt);
+                } else {
+                    const parts = timeText.split('•').map(s => s.trim());
+                    const lastActiveStr = parts.length > 1 ? parts[1] : parts[0];
+                    elapsedSec = this.parseSeconds(lastActiveStr);
+                }
 
                 let bgProg = conv.querySelector('.bg-prog');
                 if (!bgProg) {
@@ -294,13 +602,6 @@
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 2vh;">
                     <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
-                        <span>Конвертер времени (МСК) (disabled)</span>
-                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.timeConverter ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-time-bg">
-                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.timeConverter ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.timeConverter ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-time-dot"></div>
-                        </div>
-                        <input type="checkbox" id="acid-t-time" style="display: none;" ${this.settings.timeConverter ? 'checked' : ''}>
-                    </label>
-                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
                         <span>Трекер тикетов (Таймеры)</span>
                         <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.ticketTracker ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-tracker-bg">
                             <div style="position: absolute; top: 0.15vw; left: ${this.settings.ticketTracker ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.ticketTracker ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-tracker-dot"></div>
@@ -329,6 +630,20 @@
                         </div>
                         <input type="checkbox" id="acid-t-head" style="display: none;" ${this.settings.customHeader ? 'checked' : ''}>
                     </label>
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                        <span>Стили правой панели</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.rightPanelStyle ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-rp-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.rightPanelStyle ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.rightPanelStyle ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-rp-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-rp" style="display: none;" ${this.settings.rightPanelStyle ? 'checked' : ''}>
+                    </label>
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                        <span>Конвертер времени МСК</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.mskConverter ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-msk-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.mskConverter ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.mskConverter ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-msk-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-msk" style="display: none;" ${this.settings.mskConverter ? 'checked' : ''}>
+                    </label>
                 </div>
                 <button id="acid-save-btn" style="
                     width: 100%; margin-top: 3vh; padding: 1vh; background: #b3e600; color: #111827;
@@ -356,10 +671,11 @@
                 });
             };
 
-            bindToggle('acid-t-time', 'acid-t-time-bg', 'acid-t-time-dot');
             bindToggle('acid-t-tracker', 'acid-t-tracker-bg', 'acid-t-tracker-dot');
             bindToggle('acid-t-addr', 'acid-t-addr-bg', 'acid-t-addr-dot');
             bindToggle('acid-t-head', 'acid-t-head-bg', 'acid-t-head-dot');
+            bindToggle('acid-t-rp', 'acid-t-rp-bg', 'acid-t-rp-dot');
+            bindToggle('acid-t-msk', 'acid-t-msk-bg', 'acid-t-msk-dot');
 
             const closeModal = () => {
                 overlay.style.opacity = '0';
@@ -371,10 +687,11 @@
 
             document.getElementById('acid-save-btn').addEventListener('click', () => {
                 this.saveSettings({
-                    timeConverter: document.getElementById('acid-t-time').checked,
                     ticketTracker: document.getElementById('acid-t-tracker').checked,
                     addressPanel: document.getElementById('acid-t-addr').checked,
                     customHeader: document.getElementById('acid-t-head').checked,
+                    rightPanelStyle: document.getElementById('acid-t-rp').checked,
+                    mskConverter: document.getElementById('acid-t-msk').checked,
                     customValue: document.getElementById('acid-text-val').value || ''
                 });
 
@@ -397,129 +714,361 @@
             panelHtml.className = 'grid gap-1 text-sm select-none min-w-0 mt-2';
 
             panelHtml.innerHTML = `
-                <div class="flex items-center gap-2 px-1.5 py-1 rounded-lg h-8 min-w-0 text-n-slate-11 hover:bg-n-alpha-2 cursor-pointer transition-colors" id="acid-addr-header">
+                <button type="button" id="acid-addr-compact-trigger" class="acid-compact-only flex items-center justify-center size-10 rounded-lg text-n-slate-11 hover:bg-n-alpha-2" title="Биллинг Адреса">
+                    <span style="font-size: 1rem;">🌍</span>
+                </button>
+                <div class="acid-wide-only flex items-center gap-2 px-1.5 py-1 rounded-lg h-8 min-w-0 text-n-slate-11 hover:bg-n-alpha-2 cursor-pointer transition-colors" id="acid-addr-header">
                     <div class="relative flex items-center gap-2">
-                        <span style="font-size: 0.9vw; color: #b3e600; opacity: 0.8;">🌍</span>
+                        <span style="font-size: var(--acid-fs-lg); color: #b3e600; opacity: 0.8;">🌍</span>
                     </div>
                     <div class="flex items-center gap-1.5 flex-grow min-w-0 flex-1">
                         <span class="truncate text-body-main font-medium text-sm">Биллинг Адреса</span>
                     </div>
                     <span class="i-lucide-chevron-down size-3 transition-transform" id="acid-addr-icon"></span>
                 </div>
-                <ul id="acid-addr-body" class="grid m-0 list-none min-w-0 p-2 gap-2 rounded-lg mt-1" style="display: none; background: rgba(255, 255, 255, 0.03); border: 0.1vw solid rgba(255, 255, 255, 0.05);">
-                    <select id="acid-addr-country" style="background: rgba(0,0,0,0.2); color: #cbd5e1; border: 0.1vw solid rgba(255,255,255,0.08); border-radius: 0.4vw; padding: 0.6vh 0.4vw; outline: none; font-size: 0.8vw; font-family: inherit; cursor: pointer;">
-                        <option value="SG">Singapore</option>
-                    </select>
-                    <div style="font-family: inherit; font-size: 0.75vw; display: flex; flex-direction: column; gap: 0.8vh; padding: 0.5vh 0;" id="acid-addr-data">
-                        <span style="color: #64748b;">Загрузка базы...</span>
+                <ul id="acid-addr-body" class="grid m-0 list-none min-w-0 p-2 gap-2 rounded-lg mt-1" style="display: none; background: rgba(20,22,26,0.98); border: 1px solid rgba(255, 255, 255, 0.08);">
+                    <div id="acid-addr-region-title" style="display: flex; align-items: center; justify-content: center; gap: var(--acid-gap); font-size: var(--acid-fs-lg); font-weight: 600; color: #e2e8f0; padding: 0.2vh 0;">
+                        <span id="acid-addr-region-flag"></span>
+                        <span id="acid-addr-region-name"></span>
+                    </div>
+                    <div id="acid-addr-country-wrap" style="position: relative;">
+                        <button type="button" id="acid-addr-change-country-btn" style="width: 100%; box-sizing: border-box; background: rgba(255,255,255,0.05); color: #cbd5e1; border: 1px solid rgba(255,255,255,0.08); border-radius: var(--acid-radius); padding: 0.6vh var(--acid-pad-h); font-size: var(--acid-fs-md); font-family: inherit; cursor: pointer; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">Изменить страну</button>
+                        <div id="acid-addr-country-list" style="display: none; position: absolute; top: calc(100% + 0.3vh); left: 0; right: 0; z-index: 20; max-height: 22vh; overflow-y: auto; background: rgba(20,22,26,0.98); border: 1px solid rgba(255,255,255,0.1); border-radius: var(--acid-radius); padding: 0.4vh; box-shadow: 0 1vh 2vh rgba(0,0,0,0.5);"></div>
+                    </div>
+                    <div id="acid-addr-inner-panel" style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: var(--acid-radius); padding: 0.6vh var(--acid-pad-h);">
+                        <div style="font-family: inherit; font-size: var(--acid-fs-md); display: flex; flex-direction: column; gap: 0.8vh;" id="acid-addr-data">
+                            <span style="color: #64748b;">Загрузка базы...</span>
+                        </div>
                     </div>
                     <div class="flex gap-2 mt-1">
-                        <button id="acid-addr-reroll" style="flex: 1; background: rgba(255,255,255,0.05); border: 0.1vw solid transparent; color: #cbd5e1; border-radius: 0.4vw; padding: 0.6vh; font-size: 0.75vw; transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">Реролл</button>
-                        <button id="acid-addr-copy" style="flex: 1; background: transparent; border: 0.1vw solid #b3e600; color: #b3e600; border-radius: 0.4vw; padding: 0.6vh; font-size: 0.75vw; font-weight: 500; transition: 0.2s;" onmouseover="this.style.background='#b3e600'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#b3e600';">Скопировать</button>
+                        <button id="acid-addr-reroll" style="flex: 1; background: rgba(255,255,255,0.05); border: 1px solid transparent; color: #cbd5e1; border-radius: var(--acid-radius); padding: 0.6vh; font-size: var(--acid-fs-md); transition: 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">Реролл</button>
+                        <button id="acid-addr-copy" style="flex: 1; background: transparent; border: 1px solid #b3e600; color: #b3e600; border-radius: var(--acid-radius); padding: 0.6vh; font-size: var(--acid-fs-md); font-weight: 500; transition: 0.2s;" onmouseover="this.style.background='#b3e600'; this.style.color='#111827';" onmouseout="this.style.background='transparent'; this.style.color='#b3e600';">Скопировать</button>
                     </div>
                 </ul>
             `;
             navList.appendChild(panelHtml);
 
+            const li = panelHtml;
             const header = document.getElementById('acid-addr-header');
+            const compactTrigger = document.getElementById('acid-addr-compact-trigger');
             const body = document.getElementById('acid-addr-body');
             const icon = document.getElementById('acid-addr-icon');
+            const changeCountryBtn = document.getElementById('acid-addr-change-country-btn');
+            const countryList = document.getElementById('acid-addr-country-list');
+            const countryWrap = document.getElementById('acid-addr-country-wrap');
 
-            header.addEventListener('click', () => {
-                const isHidden = body.style.display === 'none';
-                body.style.display = isHidden ? 'grid' : 'none';
-                icon.style.transform = isHidden ? 'rotate(180deg)' : 'rotate(0deg)';
-                if (isHidden && !this.currentAddress) this.fetchAndRollAddress('SG');
-            });
+            this.updateRegionTitle();
 
-            document.getElementById('acid-addr-country').addEventListener('change', (e) => this.fetchAndRollAddress(e.target.value));
-            document.getElementById('acid-addr-reroll').addEventListener('click', () => {
-                const code = document.getElementById('acid-addr-country').value;
-                this.fetchAndRollAddress(code, true);
-            });
-            document.getElementById('acid-addr-copy').addEventListener('click', () => this.copyAddressToClipboard());
-        }
+            const isBodyOpen = () => body.style.display !== 'none' && body.style.display !== '';
 
-        async fetchAndRollAddress(countryCode, forceReroll = false) {
-            const dataBox = document.getElementById('acid-addr-data');
-            const cacheKey = `acid_addresses_${countryCode}`;
-            const cachedData = JSON.parse(localStorage.getItem(cacheKey));
-            const now = Date.now();
-            let houses = [];
-
-            if (cachedData && (now - cachedData.timestamp < 9993 * 60 * 60 * 1000)) {
-                houses = cachedData.houses;
-            } else {
-                dataBox.innerHTML = '<span style="color: #64748b;">Загрузка с Overpass API...</span>';
-                document.getElementById('acid-addr-reroll').disabled = true;
-
-                const region = this.addressRegions[countryCode];
-                const query = `[out:json][timeout:25];(node["addr:housenumber"]["addr:street"](${region.bbox});way["addr:housenumber"]["addr:street"](${region.bbox}););out center 1500;`;
-
-                try {
-                    const res = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(query));
-                    const data = await res.json();
-                    houses = data.elements.map(el => {
-                        const tags = el.tags || {};
-                        return {
-                            street: `${tags['addr:housenumber'] || ''} ${tags['addr:street'] || ''}`.trim(),
-                            city: tags['addr:city'] || tags['addr:suburb'] || tags['addr:neighbourhood'] || region.defaultCity,
-                            zip: tags['addr:postcode'] || ''
-                        };
-                    });
-
-                    localStorage.setItem(cacheKey, JSON.stringify({
-                        timestamp: now,
-                        houses: houses
-                    }));
-                } catch (e) {
-                    dataBox.innerHTML = '<span style="color: #ef4444;">Ошибка API</span>';
-                    document.getElementById('acid-addr-reroll').disabled = false;
-                    return;
-                }
-            }
-
-            document.getElementById('acid-addr-reroll').disabled = false;
-
-            let validHouse = null;
-            let attempts = 0;
-            while (!validHouse && attempts < 50) {
-                const random = houses[Math.floor(Math.random() * houses.length)];
-                if (random && random.street.length > 3 && random.zip && random.zip !== '00000' && !random.street.includes('#')) {
-                    validHouse = random;
-                }
-                attempts++;
-            }
-
-            if (!validHouse) {
-                dataBox.innerHTML = '<span style="color: #ef4444;">Нет полных адресов.</span>';
-                return;
-            }
-
-            const r = this.addressRegions[countryCode];
-            const fullName = `${r.names[Math.floor(Math.random() * r.names.length)]} ${r.surnames[Math.floor(Math.random() * r.surnames.length)]}`;
-
-            this.currentAddress = {
-                fullname: fullName,
-                street: validHouse.street,
-                city: validHouse.city,
-                zip: validHouse.zip,
-                country: r.name
+            const closeBody = () => {
+                body.style.display = 'none';
+                body.style.position = '';
+                body.style.left = '';
+                body.style.top = '';
+                body.classList.remove('acid-floating');
+                if (body.parentElement !== li) li.appendChild(body);
+                icon.style.transform = 'rotate(0deg)';
+                countryList.style.display = 'none';
             };
 
+            const openBody = (floatingAnchor) => {
+                if (floatingAnchor) {
+                    // Всплывающую панель выносим прямо в document.body: сам li — контейнер
+                    // container-query (нужен для масштабирования шрифта в развёрнутом режиме),
+                    // а это неявно делает li containing block для position:fixed — если оставить
+                    // body внутри, координаты из getBoundingClientRect() окажутся смещены.
+                    document.body.appendChild(body);
+                    body.classList.add('acid-floating');
+                    const rect = floatingAnchor.getBoundingClientRect();
+                    body.style.position = 'fixed';
+                    body.style.left = `${rect.right + 8}px`;
+                    body.style.top = `${rect.top}px`;
+                } else {
+                    if (body.parentElement !== li) li.appendChild(body);
+                    body.classList.remove('acid-floating');
+                    body.style.position = '';
+                    body.style.left = '';
+                    body.style.top = '';
+                }
+                body.style.display = 'grid';
+                icon.style.transform = 'rotate(180deg)';
+                if (!this.currentAddress) this.fetchAndRollAddress(this.selectedRegionCode);
+            };
+
+            header.addEventListener('click', () => isBodyOpen() ? closeBody() : openBody(null));
+            compactTrigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                isBodyOpen() ? closeBody() : openBody(compactTrigger);
+            });
+
+            document.addEventListener('click', (e) => {
+                if (!countryWrap.contains(e.target)) countryList.style.display = 'none';
+                // body может быть вынесен в document.body (плавающий режим), поэтому проверяем
+                // клик и по li, и отдельно по body — иначе клик по кнопкам внутри попапа сам же его закроет.
+                if (li.classList.contains('acid-addr-compact') && !li.contains(e.target) && !body.contains(e.target)) {
+                    closeBody();
+                }
+            });
+
+            changeCountryBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isHidden = countryList.style.display === 'none' || !countryList.style.display;
+                if (isHidden) this.renderCountryList('');
+                countryList.style.display = isHidden ? 'block' : 'none';
+            });
+
+            document.getElementById('acid-addr-reroll').addEventListener('click', () => {
+                this.fetchAndRollAddress(this.selectedRegionCode);
+            });
+            document.getElementById('acid-addr-copy').addEventListener('click', () => this.copyAddressToClipboard());
+
+            // Встроенный левый рейл Chatwoot можно сузить до иконок (Настройки внешнего вида ->
+            // компактная навигация) — тогда наша панель тоже сворачивается в иконку и открывается
+            // всплывающим окном, чтобы не вылезать за рамки узкого рейла. В развёрнутом состоянии
+            // сам рейл может иметь разную ширину — растягиваем li на всю ширину рейла (родительский
+            // ul обычно центрирует элементы по контенту, li иначе не подхватит реальную ширину),
+            // чтобы cqw-переменные считались от актуальной ширины, а не от размера контента.
+            const railEl = navList.closest('nav') || navList;
+            const applyCompactState = () => {
+                const wasCompact = li.classList.contains('acid-addr-compact');
+                const isCompact = railEl.clientWidth > 0 && railEl.clientWidth < 90;
+                li.classList.toggle('acid-addr-compact', isCompact);
+                li.style.alignSelf = isCompact ? '' : 'stretch';
+                if (isCompact !== wasCompact) closeBody();
+            };
+            applyCompactState();
+            if (typeof ResizeObserver !== 'undefined') {
+                new ResizeObserver(applyCompactState).observe(railEl);
+            }
+        }
+
+        updateRegionTitle() {
+            const region = this.addressRegions[this.selectedRegionCode];
+            const flagEl = document.getElementById('acid-addr-region-flag');
+            const nameEl = document.getElementById('acid-addr-region-name');
+            if (flagEl) flagEl.textContent = region.flag || '🏳️';
+            if (nameEl) nameEl.textContent = region.label;
+        }
+
+        renderCountryList(filter) {
+            const listEl = document.getElementById('acid-addr-country-list');
+            if (!listEl) return;
+            const f = (filter || '').trim().toLowerCase();
+            const entries = Object.entries(this.addressRegions);
+            const matches = entries.filter(([code, r]) => {
+                if (!f) return true;
+                const hay = [r.name, r.label, code, ...(r.aliases || [])].join(' ').toLowerCase();
+                return hay.includes(f);
+            });
+            const favorites = matches.filter(([, r]) => r.favorite);
+            const others = matches.filter(([, r]) => !r.favorite).sort((a, b) => a[1].label.localeCompare(b[1].label, 'ru'));
+
+            const renderItem = ([code, r]) => `
+                <div class="acid-addr-country-item" data-code="${code}" style="display: flex; align-items: center; gap: var(--acid-gap); padding: 0.7vh var(--acid-pad-h); border-radius: var(--acid-radius); cursor: pointer; font-size: var(--acid-fs-md); color: #e2e8f0; transition: background 0.15s ease;">
+                    <span>${r.flag || '🏳️'}</span>
+                    <span style="flex: 1;">${r.label}</span>
+                    ${r.favorite ? '<span style="color:#b3e600; font-size: var(--acid-fs-sm);">★</span>' : ''}
+                </div>
+            `;
+
+            let html = '';
+            if (favorites.length) {
+                html += `<div style="padding: 0.3vh var(--acid-pad-h); font-size: var(--acid-fs-sm); color: #64748b; text-transform: uppercase; letter-spacing: 0.03em;">Избранное</div>`;
+                html += favorites.map(renderItem).join('');
+            }
+            if (others.length) {
+                html += `<div style="padding: 0.3vh var(--acid-pad-h); font-size: var(--acid-fs-sm); color: #64748b; text-transform: uppercase; letter-spacing: 0.03em;">Другие регионы</div>`;
+                html += others.map(renderItem).join('');
+            }
+            listEl.innerHTML = html || `<div style="padding: 1vh; font-size: var(--acid-fs-md); color: #64748b;">Ничего не найдено</div>`;
+
+            listEl.querySelectorAll('.acid-addr-country-item').forEach(item => {
+                item.addEventListener('mouseenter', () => item.style.background = 'rgba(179,230,0,0.1)');
+                item.addEventListener('mouseleave', () => item.style.background = 'transparent');
+                item.addEventListener('click', () => this.selectRegion(item.dataset.code));
+            });
+        }
+
+        selectRegion(code) {
+            const region = this.addressRegions[code];
+            if (!region) return;
+            this.selectedRegionCode = code;
+            this.updateRegionTitle();
+            document.getElementById('acid-addr-country-list').style.display = 'none';
+            this.fetchAndRollAddress(code);
+        }
+
+        pickRandom(arr) {
+            return arr[Math.floor(Math.random() * arr.length)];
+        }
+
+        // Оборачивает GM_xmlhttpRequest в промис. Используем GM_xmlhttpRequest, а не fetch(),
+        // потому что адресный сервер живёт на своём домене (gammahub.tech), а не на cw.echelon.su —
+        // GM_xmlhttpRequest у Tampermonkey игнорирует CORS, обычный fetch() тут бы просто упал.
+        gmGetJson(url) {
+            return new Promise((resolve, reject) => {
+                GM_xmlhttpRequest({
+                    method: 'GET',
+                    url,
+                    timeout: 15000,
+                    onload: (res) => {
+                        if (res.status < 200 || res.status >= 300) {
+                            reject(new Error('Адресный сервер: HTTP ' + res.status));
+                            return;
+                        }
+                        try {
+                            resolve(JSON.parse(res.responseText));
+                        } catch (e) {
+                            reject(new Error('Адресный сервер вернул не-JSON'));
+                        }
+                    },
+                    onerror: () => reject(new Error('Адресный сервер недоступен')),
+                    ontimeout: () => reject(new Error('Адресный сервер: таймаут'))
+                });
+            });
+        }
+
+        regionCacheKey(code) {
+            return `acid_addresses_v5_${code}`;
+        }
+
+        getRegionCache(code) {
+            try {
+                return JSON.parse(localStorage.getItem(this.regionCacheKey(code)) || 'null');
+            } catch (e) {
+                return null;
+            }
+        }
+
+        saveRegionCache(code, cache) {
+            localStorage.setItem(this.regionCacheKey(code), JSON.stringify(cache));
+        }
+
+        // Первичная выдача пачки адресов для региона (get_addresses.php) — избранные регионы
+        // получают 40 адресов, базовые — 25 (решает сервер, см. server/common.php).
+        async fetchAddressBatch(code) {
+            const data = await this.gmGetJson(`${this.ADDRESS_SERVER_BASE}/get_addresses.php?region=${encodeURIComponent(code)}`);
+            if (!data || !Array.isArray(data.houses) || data.houses.length === 0) {
+                throw new Error('Сервер не вернул адреса для региона ' + code);
+            }
+            const cache = { houses: data.houses, used: [] };
+            this.saveRegionCache(code, cache);
+            return cache;
+        }
+
+        // Реролл пачки для одного региона (reroll.php) — вызывается только когда в
+        // локал сторадж уже нет неиспробованных адресов для этого региона.
+        async fetchRerollBatch(code) {
+            const data = await this.gmGetJson(`${this.ADDRESS_SERVER_BASE}/reroll.php?region=${encodeURIComponent(code)}`);
+            if (!data || !Array.isArray(data.houses) || data.houses.length === 0) {
+                throw new Error('Сервер не вернул адреса для реролла региона ' + code);
+            }
+            const cache = { houses: data.houses, used: [] };
+            this.saveRegionCache(code, cache);
+            return cache;
+        }
+
+        // Возвращает рабочий кеш региона: из локал сторадж, если там ещё остались
+        // неиспробованные адреса, иначе — новая пачка с сервера (первая загрузка или реролл).
+        async ensureRegionCache(code) {
+            const cached = this.getRegionCache(code);
+            if (cached && cached.houses && cached.houses.length > 0 && cached.used.length < cached.houses.length) {
+                return cached;
+            }
+            if (cached && cached.houses && cached.houses.length > 0) {
+                return this.fetchRerollBatch(code);
+            }
+            return this.fetchAddressBatch(code);
+        }
+
+        // Прогревает кеш избранных регионов (SG/HK/DE/US), пока пользователь смотрит выбранную
+        // страну, чтобы переключение на них уже не ждало сетевого запроса. Регионы, для которых
+        // кеш уже есть (даже исчерпанный), не трогаем — реролл для них произойдёт по требованию.
+        async prefetchRegions() {
+            if (this.prefetchStarted) return;
+            this.prefetchStarted = true;
+            const codes = Object.keys(this.addressRegions).filter(c => c !== this.selectedRegionCode && this.addressRegions[c].favorite && !this.getRegionCache(c));
+            for (const code of codes) {
+                try {
+                    await this.fetchAddressBatch(code);
+                } catch (e) {}
+            }
+        }
+
+        async fetchAndRollAddress(countryCode) {
+            const dataBox = document.getElementById('acid-addr-data');
+            const rerollBtn = document.getElementById('acid-addr-reroll');
+            dataBox.innerHTML = '<span style="color: #64748b;">Загрузка...</span>';
+            rerollBtn.disabled = true;
+
+            try {
+                const cache = await this.ensureRegionCache(countryCode);
+
+                const usedSet = new Set(cache.used);
+                const freeIndices = cache.houses.map((_, i) => i).filter(i => !usedSet.has(i));
+                const pickPool = freeIndices.length > 0 ? freeIndices : cache.houses.map((_, i) => i);
+                const idx = this.pickRandom(pickPool);
+                const house = cache.houses[idx];
+
+                if (!usedSet.has(idx)) {
+                    usedSet.add(idx);
+                    cache.used = Array.from(usedSet);
+                    this.saveRegionCache(countryCode, cache);
+                }
+
+                const region = this.addressRegions[countryCode];
+                const fullName = `${this.pickRandom(region.names)} ${this.pickRandom(region.surnames)}`;
+
+                this.currentAddress = {
+                    fullname: fullName,
+                    street: house.street,
+                    city: house.city,
+                    zip: house.zip,
+                    state: house.state,
+                    needsState: !!region.needsState,
+                    country: region.name
+                };
+
+                this.renderAddressData();
+
+                if (countryCode === this.selectedRegionCode) this.prefetchRegions();
+            } catch (e) {
+                dataBox.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 0.4vh;">
+                        <span style="color: #ef4444;">Ошибка API — сервис перегружен</span>
+                        <button id="acid-addr-retry" style="background: transparent; border: 1px solid #ef4444; color: #ef4444; border-radius: var(--acid-radius); padding: 0.3vh 0.6vh; font-size: var(--acid-fs-sm); cursor: pointer;">Повторить</button>
+                    </div>
+                `;
+                const retryBtn = document.getElementById('acid-addr-retry');
+                if (retryBtn) retryBtn.addEventListener('click', () => this.fetchAndRollAddress(countryCode));
+            } finally {
+                rerollBtn.disabled = false;
+            }
+        }
+
+        renderAddressData() {
+            const dataBox = document.getElementById('acid-addr-data');
+            const a = this.currentAddress;
             dataBox.innerHTML = `
-                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Имя:</span> <span style="color:#e2e8f0; text-align: right;">${this.currentAddress.fullname}</span></div>
-                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Улица:</span> <span style="color:#e2e8f0; text-align: right;">${this.currentAddress.street}</span></div>
-                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Город:</span> <span style="color:#e2e8f0; text-align: right;">${this.currentAddress.city}</span></div>
-                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Индекс:</span> <span style="color:#e2e8f0; text-align: right;">${this.currentAddress.zip}</span></div>
-                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Страна:</span> <span style="color:#e2e8f0; text-align: right;">${this.currentAddress.country}</span></div>
+                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Имя:</span> <span style="color:#e2e8f0; text-align: right;">${a.fullname}</span></div>
+                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Улица:</span> <span style="color:#e2e8f0; text-align: right;">${a.street}</span></div>
+                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Город:</span> <span style="color:#e2e8f0; text-align: right;">${a.city}</span></div>
+                ${a.needsState ? `<div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Штат:</span> <span style="color:#e2e8f0; text-align: right;">${a.state || '-'}</span></div>` : ''}
+                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Индекс:</span> <span style="color:#e2e8f0; text-align: right;">${a.zip}</span></div>
+                <div style="display: flex; justify-content: space-between;"><span style="color:#64748b;">Страна:</span> <span style="color:#e2e8f0; text-align: right;">${a.country}</span></div>
             `;
         }
 
         copyAddressToClipboard() {
             if (!this.currentAddress) return;
             const a = this.currentAddress;
-            const text = `Имя и фамилия: ${a.fullname}\nУлица: ${a.street}\nИндекс: ${a.zip}\nСтрана/Город: ${a.country}`;
+            let text = `Имя и фамилия: ${a.fullname}\nУлица: ${a.street}\n`;
+            if (a.needsState) text += `Штат: ${a.state || '-'}\n`;
+            text += `Индекс: ${a.zip}\n`;
+            text += (a.city && a.city !== a.country) ?
+                `Город: ${a.city}\nСтрана: ${a.country}` :
+                `Страна: ${a.country}`;
 
             navigator.clipboard.writeText(text).then(() => {
                 const btn = document.getElementById('acid-addr-copy');
@@ -547,9 +1096,56 @@
                             self.renderHeaderUI();
                         } catch (e) {}
                     }
+                    if (this.responseURL && this.responseURL.includes('/conversations') && this.responseURL.includes('assignee_type=')) {
+                        try {
+                            self.cacheConversationsPayload(JSON.parse(this.responseText));
+                        } catch (e) {}
+                    }
                 });
                 return originalXhrSend.apply(this, args);
             };
+
+            const originalFetch = targetWin.fetch;
+            if (originalFetch) {
+                targetWin.fetch = function (input, init) {
+                    const promise = originalFetch.apply(this, arguments);
+                    try {
+                        const url = typeof input === 'string' ? input : (input && input.url) || '';
+                        if (url.includes('/conversations') && url.includes('assignee_type=')) {
+                            promise.then(res => {
+                                if (!res.ok) return;
+                                res.clone().json().then(data => self.cacheConversationsPayload(data)).catch(() => {});
+                            }).catch(() => {});
+                        }
+                    } catch (e) {}
+                    return promise;
+                };
+            }
+        }
+
+        // Список тикетов приходит без "готового" DOM id, поэтому сопоставляем карточку
+        // с записью из API по отпечатку "имя контакта + начало превью сообщения" —
+        // этого достаточно, чтобы не зависеть от внутренней вёрстки Chatwoot.
+        normalizeFingerprintText(s) {
+            return (s || '').replace(/[\\\s]+/g, ' ').trim().toLowerCase().slice(0, 30);
+        }
+
+        cacheConversationsPayload(data) {
+            const payload = data && data.data && data.data.payload;
+            if (!Array.isArray(payload)) return;
+            const now = Date.now();
+            for (const conv of payload) {
+                const senderName = (conv.meta && conv.meta.sender && conv.meta.sender.name) || '';
+                const lastMsg = conv.last_non_activity_message;
+                if (!senderName || !lastMsg) continue;
+                const fingerprint = senderName.trim().toLowerCase() + '|' + this.normalizeFingerprintText(lastMsg.content);
+                this.conversationsCache.set(fingerprint, {
+                    fetchedAt: now,
+                    lastActivityAt: conv.last_activity_at,
+                    createdAt: conv.created_at,
+                    isAgentMessage: lastMsg.sender_type === 'User'
+                });
+            }
         }
 
         formatMSK(timestamp) {
@@ -657,7 +1253,6 @@
         }
 
         startIntervalTasks() {
-            this.intervals.timeConverter = setInterval(() => this.featureTimeConverter(), 500);
             this.intervals.ticketTracker = setInterval(() => this.featureTicketTracker(), 1000);
         }
 
