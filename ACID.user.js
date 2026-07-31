@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.89
+// @version      3.9
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -128,7 +128,7 @@
             const status = (card.status || '').toUpperCase();
             if (card.closed_at || status === 'CLOSED') return { key: 'closed', label: 'Закрыта' };
             if (card.close_requested_at) return { key: 'closing', label: 'В закрытии' };
-            if (status.includes('FROZ')) return { key: 'frozen', label: 'Заморожена' };
+            if (status.includes('INACTIVE')) return { key: 'frozen', label: 'Заморожена' };
             return { key: 'active', label: 'Активна' };
         }
 
