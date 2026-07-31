@@ -92,6 +92,327 @@
         }
     }
 
+    // Вкладка "Профиль" рабочей панели (adm2.echelon.su) рендерит карты клиента как
+    // унылые строки на всю ширину. Мы перехватываем ответ её собственного XHR/fetch
+    // на /api/dashboard/profile/cards (тот же приём, что уже даёт данные тикета) и
+    // поверх существующих React-строк рисуем свою карточку. Сами строки-элементы не
+    // трогаем и не пересоздаём (см. предупреждение про onCommitFiberUnmount/removeChild
+    // на скриншоте — вставка/удаление чужих узлов внутри React-поддерева может уронить
+    // reconciliation), только прячем их исходное содержимое через CSS (!important поверх
+    // инлайновых стилей) и добавляем свой оверлей отдельным дочерним узлом — клик по нему
+    // всплывает к самому React-обработчику строки, поэтому переход в расширённую карточку
+    // продолжает работать как раньше.
+    function initDashboardCardsPanel() {
+        // product_id -> цена продукта в $. API этого не возвращает, список известных id
+        // поддерживается вручную по мере появления новых продуктов.
+        const PRODUCT_PRICES = {
+            6: [8, "Стандартная"],
+            12: [15, "Эстонская"],
+            15: [30, "Эплпей Сингапур"],
+            4: [30, "Эплпей Гонконг"],
+        };
+
+        function productLabel(productId) {
+            const price = PRODUCT_PRICES[productId];
+            return price != null ? `п${productId} | ${price[0]}$ (${price[1]})` : `п${productId}`;
+        }
+
+        function networkClass(network) {
+            const n = (network || '').toUpperCase();
+            if (n === 'VISA') return 'acid-net-visa';
+            if (n.includes('MASTER') || n === 'MC') return 'acid-net-mc';
+            return 'acid-net-other';
+        }
+
+        function cardStatusInfo(card) {
+            const status = (card.status || '').toUpperCase();
+            if (card.closed_at || status === 'CLOSED') return { key: 'closed', label: 'Закрыта' };
+            if (card.close_requested_at) return { key: 'closing', label: 'В закрытии' };
+            if (status.includes('FROZ')) return { key: 'frozen', label: 'Заморожена' };
+            return { key: 'active', label: 'Активна' };
+        }
+
+        function formatCardDate(raw) {
+            if (!raw) return '—';
+            const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(raw);
+            if (!m) return raw;
+            return `${m[3]}.${m[2]}.${m[1].slice(2)}`;
+        }
+
+        function formatPan(card) {
+            if (card.pan) return card.pan.replace(/(.{4})/g, '$1 ').trim();
+            return `•••• •••• •••• ${card.l4 || '????'}`;
+        }
+
+        const MASK_RE = /^[·•]{2,}\d{3,4}$/;
+
+        function findMaskSpan(el) {
+            return Array.from(el.querySelectorAll('span')).find(s => MASK_RE.test((s.textContent || '').trim()));
+        }
+
+        function extractL4(el) {
+            const span = findMaskSpan(el);
+            if (!span) return null;
+            const m = /(\d{3,4})$/.exec(span.textContent.trim());
+            return m ? m[1] : null;
+        }
+
+        // #profile-root содержит несколько .no-sb (сайдбар профиля, полоска фильтров,
+        // список карт) — позиция среди них не гарантирована (зависит от активной под-вкладки
+        // Карты/Stars/eSIM), поэтому ищем контейнер списка карт по содержимому: он либо
+        // содержит строку с замаскированным PAN, либо пустой текст "Карт не найдено".
+        function findCardsListContainer(pane) {
+            const candidates = pane.querySelectorAll('.no-sb');
+            for (const el of candidates) {
+                if (findMaskSpan(el) || /карт\s*не\s*найдено/i.test(el.textContent || '')) return el;
+            }
+            return null;
+        }
+
+        function findCardRows(pane) {
+            const listWrap = findCardsListContainer(pane);
+            if (!listWrap || !listWrap.firstElementChild) return [];
+            const grid = listWrap.firstElementChild;
+            const candidates = Array.from(grid.children).filter(el => el.nodeType === 1);
+            const rows = candidates.filter(findMaskSpan);
+            if (!rows.length) return [];
+            grid.classList.add('acid-cards-grid');
+            rows.forEach(row => {
+                row.dataset.acidL4 = extractL4(row) || '';
+            });
+            return rows;
+        }
+
+        function matchCardsToRows(rows, cards) {
+            const byL4 = new Map();
+            cards.forEach(c => {
+                const l4 = (c.l4 || (c.pan || '').slice(-4) || '').toString();
+                if (l4 && !byL4.has(l4)) byL4.set(l4, c);
+            });
+            const sameLength = rows.length === cards.length;
+            return rows.map((row, idx) => {
+                const l4 = row.dataset.acidL4;
+                if (l4 && byL4.has(l4)) return byL4.get(l4);
+                return sameLength ? cards[idx] : null;
+            });
+        }
+
+        function networkLabel(network) {
+            const n = (network || '').toUpperCase();
+            if (n === 'VISA') return 'VISA';
+            if (n.includes('MASTER') || n === 'MC') return 'MASTERCARD';
+            return n || '—';
+        }
+
+        function buildOverlay(card) {
+            const status = cardStatusInfo(card);
+            const overlay = document.createElement('div');
+            overlay.className = 'acid-card-overlay';
+            overlay.innerHTML = `
+                <div class="acid-card-top">
+                    <span class="acid-card-status st-${status.key}">${status.label}</span>
+                    <span class="acid-card-hidden" style="color:${card.hidden ? '#f87171' : 'rgba(255,255,255,.55)'}">${card.hidden ? '🙈 Скрыта' : '👁 Видна'}</span>
+                </div>
+                <div class="acid-card-mid">
+                    <div class="acid-card-pan">${formatPan(card)}</div>
+                    <div class="acid-card-id-row">
+                        <span>ID ${card.id ?? '—'}</span>
+                        <span class="acid-card-product">${productLabel(card.product_id)}</span>
+                    </div>
+                </div>
+                <div class="acid-card-bottom">
+                    <span class="acid-card-created">${formatCardDate(card.created_at)} · ${networkLabel(card.network)}</span>
+                    <span class="acid-card-balance">$${Number(card.balance || 0).toFixed(2)}</span>
+                </div>
+            `;
+            return overlay;
+        }
+
+        function decorateRow(row, card) {
+            const fp = [card.id, card.balance, card.hidden, card.status, card.close_requested_at, card.closed_at].join('|');
+            if (row.dataset.acidCardFp === fp) return;
+            row.dataset.acidCardFp = fp;
+            row.querySelectorAll(':scope > .acid-card-overlay').forEach(n => n.remove());
+            row.classList.remove('acid-net-visa', 'acid-net-mc', 'acid-net-other');
+            row.classList.add('acid-card', networkClass(card.network));
+            row.appendChild(buildOverlay(card));
+        }
+
+        // Сайдбар профиля (имя, баланс, контакты, аккаунт) — тот .no-sb, что содержит h1
+        // с именем клиента; этим он однозначно отличается от списка карт и от полоски фильтров.
+        function findProfileSidebar(pane) {
+            const candidates = pane.querySelectorAll('.no-sb');
+            for (const el of candidates) {
+                if (el.querySelector('h1')) return el;
+            }
+            return null;
+        }
+
+        function ensureSettingsHint(pane) {
+            const sidebar = findProfileSidebar(pane);
+            if (!sidebar || !sidebar.firstElementChild) return;
+            const wrapper = sidebar.firstElementChild;
+            if (wrapper.querySelector('.acid-cards-hint')) return;
+            const hint = document.createElement('div');
+            hint.className = 'acid-cards-hint';
+            hint.innerHTML = '⚙️ Новый вид карт — модификация ACID. Отключить и вернуть старый вид можно в <b>ACID SETTINGS</b>.';
+            wrapper.appendChild(hint);
+        }
+
+        let lastCards = null;
+
+        function renderCardsUI() {
+            const activeTab = document.querySelector('.shell-tab.active[data-tab="profile"]');
+            if (!activeTab) return;
+            const pane = document.getElementById('profile-root') || document.querySelector('.tab-pane.active');
+            if (!pane) return;
+            ensureSettingsHint(pane);
+            if (!lastCards) return;
+            const rows = findCardRows(pane);
+            if (!rows.length) return;
+            const matched = matchCardsToRows(rows, lastCards);
+            rows.forEach((row, i) => {
+                if (matched[i]) decorateRow(row, matched[i]);
+            });
+        }
+
+        function setupNetworkHook() {
+            const w = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
+
+            const handle = (url, json) => {
+                if (!url || !url.includes('/api/dashboard/profile/cards')) return;
+                if (!Array.isArray(json)) return;
+                lastCards = json;
+                renderCardsUI();
+            };
+
+            const originalFetch = w.fetch;
+            if (originalFetch) {
+                w.fetch = function (input, init) {
+                    const promise = originalFetch.apply(this, arguments);
+                    try {
+                        const url = typeof input === 'string' ? input : (input && input.url) || '';
+                        if (url.includes('/api/dashboard/profile/cards')) {
+                            promise.then(res => {
+                                if (!res.ok) return;
+                                res.clone().json().then(json => handle(url, json)).catch(() => {});
+                            }).catch(() => {});
+                        }
+                    } catch (e) {}
+                    return promise;
+                };
+            }
+
+            const originalSend = w.XMLHttpRequest.prototype.send;
+            w.XMLHttpRequest.prototype.send = function (...args) {
+                this.addEventListener('load', function () {
+                    try {
+                        if (this.responseURL && this.responseURL.includes('/api/dashboard/profile/cards')) {
+                            handle(this.responseURL, JSON.parse(this.responseText));
+                        }
+                    } catch (e) {}
+                });
+                return originalSend.apply(this, args);
+            };
+        }
+
+        function injectCardStyles() {
+            const style = document.createElement('style');
+            style.textContent = `
+                /* Раньше размеры текста были в px, а сама карта — в % от ширины родителя
+                   (которая зависит от ширины окна/монитора): на широком мониторе карта
+                   растягивалась, а шрифт оставался тем же фиксированным размером, и наоборот
+                   на узком. Контейнерные единицы (cqw) считаются от ширины САМОЙ карты, а не
+                   от вьюпорта, поэтому при неизменном aspect-ratio пропорции текста внутри
+                   карты одинаковы на любом мониторе — большая карта просто одинаково
+                   масштабируется целиком, а не "большая карта + мелкий текст". */
+                .acid-cards-grid {
+                    display: grid !important;
+                    grid-template-columns: repeat(2, minmax(0, 1fr));
+                    gap: 14px;
+                }
+                .acid-card {
+                    display: block !important;
+                    position: relative !important;
+                    width: 100% !important;
+                    aspect-ratio: 1.586 / 1;
+                    margin: 0 !important;
+                    padding: 0 !important;
+                    border-radius: 1.8cqw !important;
+                    border-left: none !important;
+                    overflow: hidden;
+                    box-sizing: border-box;
+                    cursor: pointer;
+                    container-type: inline-size;
+                }
+                /* :last-child ломается сам собой, как только мы дописываем оверлей третьим
+                   ребёнком — он и становится "последним", а исходный span с балансом больше не
+                   матчится и остаётся видимым. Прячем всё, что не наш оверлей, явно по классу. */
+                .acid-card > *:not(.acid-card-overlay) { display: none !important; }
+                /* Градиент — на самом оверлее, а не на .acid-card: у строки-родителя есть
+                   инлайновый style="background: transparent" из React-разметки, а инлайн-стиль
+                   перебивает любое правило класса без !important. */
+                .acid-net-visa .acid-card-overlay  { background: linear-gradient(135deg, #0d1b4c 0%, #142d7a 55%, #0a1230 100%); }
+                .acid-net-mc   .acid-card-overlay  { background: linear-gradient(135deg, #eb001b 0%, #ff5f00 55%, #b8250f 100%); }
+                .acid-net-other .acid-card-overlay { background: linear-gradient(135deg, #3a3f47 0%, #23262b 100%); }
+                .acid-card-overlay {
+                    position: absolute; inset: 0;
+                    display: flex; flex-direction: column; justify-content: space-between;
+                    padding: 3cqw 4cqw; box-sizing: border-box;
+                    font-family: "SF Mono", "JetBrains Mono", Consolas, monospace;
+                    color: #fff;
+                    text-shadow: 0 0.2cqw 0.5cqw rgba(0,0,0,0.25);
+                }
+                .acid-card-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 2cqw; }
+                .acid-card-status { font-size: 3cqw; font-weight: 700; padding: 0.5cqw 2cqw; border-radius: 1.5cqw; background: rgba(0,0,0,0.25); letter-spacing: 0.02em; white-space: nowrap; }
+                .acid-card-status.st-active  { color: #4ade80; }
+                .acid-card-status.st-frozen  { color: #38bdf8; }
+                .acid-card-status.st-closed  { color: #f87171; }
+                .acid-card-status.st-closing { color: #facc15; }
+                .acid-card-hidden { font-size: 3cqw; font-weight: 600; white-space: nowrap; }
+                .acid-card-mid { display: flex; flex-direction: column; gap: 1.3cqw; }
+                .acid-card-pan { font-size: 4.5cqw; font-weight: 700; letter-spacing: 0.03em; }
+                .acid-card-id-row { display: flex; align-items: center; gap: 1.7cqw; font-size: 3.2cqw; opacity: 0.85; }
+                .acid-card-product { background: rgba(0,0,0,0.25); padding: 0.2cqw 1.7cqw; border-radius: 1.3cqw; font-weight: 600; }
+                .acid-card-bottom { display: flex; justify-content: space-between; align-items: flex-end; }
+                .acid-card-created { font-size: 2.9cqw; opacity: 0.8; }
+                .acid-card-balance { font-size: 6cqw; font-weight: 800; }
+                .acid-cards-hint {
+                    margin-top: 16px;
+                    padding: 10px 12px;
+                    border-radius: 8px;
+                    background: rgba(179, 230, 0, 0.08);
+                    border: 1px solid rgba(179, 230, 0, 0.25);
+                    color: rgb(176, 176, 172);
+                    font-size: 11.5px;
+                    line-height: 1.5;
+                }
+                .acid-cards-hint b { color: #b3e600; }
+            `;
+            document.head.appendChild(style);
+        }
+
+        function startDomWatch() {
+            injectCardStyles();
+            renderCardsUI();
+            new MutationObserver(() => renderCardsUI()).observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+            document.addEventListener('click', (e) => {
+                const btn = e.target.closest && e.target.closest('.shell-tab[data-tab="profile"]');
+                if (btn) setTimeout(renderCardsUI, 50);
+            });
+        }
+
+        setupNetworkHook();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startDomWatch);
+        } else {
+            startDomWatch();
+        }
+    }
+
     // Настройки хранятся через GM_setValue/GM_getValue, а не localStorage: последний
     // изолирован по origin, и adm2.echelon.su (другой домен, где живёт iframe) не увидел бы
     // localStorage, записанный на cw.echelon.su. GM-хранилище общее для всего скрипта.
@@ -108,9 +429,11 @@
 
     if (location.hostname === 'adm2.echelon.su') {
         const settings = loadSharedSettings({
-            mskConverter: true
+            mskConverter: true,
+            cardsPanel: true
         });
         if (settings.mskConverter) initDashboardMskConverter();
+        if (settings.cardsPanel) initDashboardCardsPanel();
         return;
     }
 
@@ -122,6 +445,7 @@
                 customHeader: true,
                 rightPanelStyle: true,
                 mskConverter: true,
+                cardsPanel: true,
                 customValue: ''
             };
             this.settings = this.loadSettings();
@@ -644,6 +968,13 @@
                         </div>
                         <input type="checkbox" id="acid-t-msk" style="display: none;" ${this.settings.mskConverter ? 'checked' : ''}>
                     </label>
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                        <span>Карточки клиента (Профиль)</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.cardsPanel ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-cards-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.cardsPanel ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.cardsPanel ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-cards-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-cards" style="display: none;" ${this.settings.cardsPanel ? 'checked' : ''}>
+                    </label>
                 </div>
                 <button id="acid-save-btn" style="
                     width: 100%; margin-top: 3vh; padding: 1vh; background: #b3e600; color: #111827;
@@ -676,6 +1007,7 @@
             bindToggle('acid-t-head', 'acid-t-head-bg', 'acid-t-head-dot');
             bindToggle('acid-t-rp', 'acid-t-rp-bg', 'acid-t-rp-dot');
             bindToggle('acid-t-msk', 'acid-t-msk-bg', 'acid-t-msk-dot');
+            bindToggle('acid-t-cards', 'acid-t-cards-bg', 'acid-t-cards-dot');
 
             const closeModal = () => {
                 overlay.style.opacity = '0';
@@ -692,6 +1024,7 @@
                     customHeader: document.getElementById('acid-t-head').checked,
                     rightPanelStyle: document.getElementById('acid-t-rp').checked,
                     mskConverter: document.getElementById('acid-t-msk').checked,
+                    cardsPanel: document.getElementById('acid-t-cards').checked,
                     customValue: document.getElementById('acid-text-val').value || ''
                 });
 
