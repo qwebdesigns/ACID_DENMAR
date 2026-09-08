@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.9
+// @version      3.91
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -248,25 +248,41 @@
             return null;
         }
 
-        function ensureSettingsHint(pane) {
+        function formatRegistrationDate(raw) {
+            if (!raw) return null;
+            const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})/.exec(raw);
+            if (!m) return null;
+            const [, year, month, day, hour, minute] = m;
+            const date = `${String(Number(day)).padStart(2, '0')}.${String(Number(month)).padStart(2, '0')}.${year}`;
+            const time = `${Number(hour)}:${minute}`;
+            return `Регистрация: ${date} в ${time} (+0)`;
+        }
+
+        function ensureSettingsHint(pane, user) {
             const sidebar = findProfileSidebar(pane);
             if (!sidebar || !sidebar.firstElementChild) return;
             const wrapper = sidebar.firstElementChild;
-            if (wrapper.querySelector('.acid-cards-hint')) return;
-            const hint = document.createElement('div');
-            hint.className = 'acid-cards-hint';
-            hint.innerHTML = '⚙️ Новый вид карт — модификация ACID. Отключить и вернуть старый вид можно в <b>ACID SETTINGS</b>.';
-            wrapper.appendChild(hint);
+            const text = user && user.created_at ? formatRegistrationDate(user.created_at) : null;
+            if (!text) return;
+
+            let hint = wrapper.querySelector('.acid-cards-hint');
+            if (!hint) {
+                hint = document.createElement('div');
+                hint.className = 'acid-cards-hint';
+                wrapper.appendChild(hint);
+            }
+            hint.textContent = text;
         }
 
         let lastCards = null;
+        let lastUserProfile = null;
 
         function renderCardsUI() {
             const activeTab = document.querySelector('.shell-tab.active[data-tab="profile"]');
             if (!activeTab) return;
             const pane = document.getElementById('profile-root') || document.querySelector('.tab-pane.active');
             if (!pane) return;
-            ensureSettingsHint(pane);
+            ensureSettingsHint(pane, lastUserProfile);
             if (!lastCards) return;
             const rows = findCardRows(pane);
             if (!rows.length) return;
@@ -280,10 +296,20 @@
             const w = typeof unsafeWindow !== 'undefined' ? unsafeWindow : window;
 
             const handle = (url, json) => {
-                if (!url || !url.includes('/api/dashboard/profile/cards')) return;
-                if (!Array.isArray(json)) return;
-                lastCards = json;
-                renderCardsUI();
+                if (!url) return;
+
+                if (url.includes('/api/dashboard/profile/cards')) {
+                    if (!Array.isArray(json)) return;
+                    lastCards = json;
+                    renderCardsUI();
+                    return;
+                }
+
+                if (url.includes('/api/dashboard/profile/user')) {
+                    if (!json || typeof json !== 'object') return;
+                    lastUserProfile = json;
+                    renderCardsUI();
+                }
             };
 
             const originalFetch = w.fetch;
@@ -292,7 +318,7 @@
                     const promise = originalFetch.apply(this, arguments);
                     try {
                         const url = typeof input === 'string' ? input : (input && input.url) || '';
-                        if (url.includes('/api/dashboard/profile/cards')) {
+                        if (url.includes('/api/dashboard/profile/cards') || url.includes('/api/dashboard/profile/user')) {
                             promise.then(res => {
                                 if (!res.ok) return;
                                 res.clone().json().then(json => handle(url, json)).catch(() => {});
@@ -307,7 +333,7 @@
             w.XMLHttpRequest.prototype.send = function (...args) {
                 this.addEventListener('load', function () {
                     try {
-                        if (this.responseURL && this.responseURL.includes('/api/dashboard/profile/cards')) {
+                        if (this.responseURL && (this.responseURL.includes('/api/dashboard/profile/cards') || this.responseURL.includes('/api/dashboard/profile/user'))) {
                             handle(this.responseURL, JSON.parse(this.responseText));
                         }
                     } catch (e) {}
@@ -378,16 +404,17 @@
                 .acid-card-created { font-size: 2.9cqw; opacity: 0.8; }
                 .acid-card-balance { font-size: 6cqw; font-weight: 800; }
                 .acid-cards-hint {
-                    margin-top: 16px;
-                    padding: 10px 12px;
-                    border-radius: 8px;
-                    background: rgba(179, 230, 0, 0.08);
-                    border: 1px solid rgba(179, 230, 0, 0.25);
-                    color: rgb(176, 176, 172);
-                    font-size: 11.5px;
-                    line-height: 1.5;
+                    margin-top: 12px;
+                    padding: 7px 10px;
+                    border-radius: 7px;
+                    background: rgba(95, 107, 122, 0.12);
+                    border: 1px solid rgba(154, 166, 179, 0.18);
+                    color: rgba(217, 221, 228, 0.8);
+                    font-size: 11px;
+                    line-height: 1.4;
+                    letter-spacing: 0.01em;
+                    opacity: 0.9;
                 }
-                .acid-cards-hint b { color: #b3e600; }
             `;
             document.head.appendChild(style);
         }
