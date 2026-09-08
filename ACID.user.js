@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.91
+// @version      3.92
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -271,24 +271,42 @@
                 hint.className = 'acid-cards-hint';
                 wrapper.appendChild(hint);
             }
-            hint.textContent = text;
+            if (hint.textContent !== text) {
+                hint.textContent = text;
+            }
         }
 
         let lastCards = null;
         let lastUserProfile = null;
+        let renderScheduled = false;
 
         function renderCardsUI() {
             const activeTab = document.querySelector('.shell-tab.active[data-tab="profile"]');
             if (!activeTab) return;
             const pane = document.getElementById('profile-root') || document.querySelector('.tab-pane.active');
             if (!pane) return;
-            ensureSettingsHint(pane, lastUserProfile);
-            if (!lastCards) return;
-            const rows = findCardRows(pane);
-            if (!rows.length) return;
-            const matched = matchCardsToRows(rows, lastCards);
-            rows.forEach((row, i) => {
-                if (matched[i]) decorateRow(row, matched[i]);
+            if (pane.dataset.acidRenderBusy === '1') return;
+            pane.dataset.acidRenderBusy = '1';
+            try {
+                ensureSettingsHint(pane, lastUserProfile);
+                if (!lastCards) return;
+                const rows = findCardRows(pane);
+                if (!rows.length) return;
+                const matched = matchCardsToRows(rows, lastCards);
+                rows.forEach((row, i) => {
+                    if (matched[i]) decorateRow(row, matched[i]);
+                });
+            } finally {
+                pane.dataset.acidRenderBusy = '0';
+            }
+        }
+
+        function scheduleRender() {
+            if (renderScheduled) return;
+            renderScheduled = true;
+            requestAnimationFrame(() => {
+                renderScheduled = false;
+                renderCardsUI();
             });
         }
 
@@ -301,14 +319,14 @@
                 if (url.includes('/api/dashboard/profile/cards')) {
                     if (!Array.isArray(json)) return;
                     lastCards = json;
-                    renderCardsUI();
+                    scheduleRender();
                     return;
                 }
 
                 if (url.includes('/api/dashboard/profile/user')) {
                     if (!json || typeof json !== 'object') return;
                     lastUserProfile = json;
-                    renderCardsUI();
+                    scheduleRender();
                 }
             };
 
@@ -421,14 +439,15 @@
 
         function startDomWatch() {
             injectCardStyles();
-            renderCardsUI();
-            new MutationObserver(() => renderCardsUI()).observe(document.body, {
+            scheduleRender();
+            const observer = new MutationObserver(() => scheduleRender());
+            observer.observe(document.body, {
                 childList: true,
                 subtree: true
             });
             document.addEventListener('click', (e) => {
                 const btn = e.target.closest && e.target.closest('.shell-tab[data-tab="profile"]');
-                if (btn) setTimeout(renderCardsUI, 50);
+                if (btn) setTimeout(scheduleRender, 50);
             });
         }
 
