@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.93
+// @version      3.94
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -984,14 +984,18 @@
         }
 
         tweakConversationContextMenu(menu) {
-            const findItemByLabel = (text) => Array.from(menu.querySelectorAll('.menu')).find(el => {
+            // Текст пункта зависит от текущего статуса тикета (Chatwoot подставляет
+            // "Пометить как..." или "Отметить как..." в зависимости от того, из какого
+            // статуса переключаем) — поэтому ищем по ключевому слову внутри строки,
+            // а не по полному точному совпадению.
+            const findItemByPattern = (regex) => Array.from(menu.querySelectorAll('.menu')).find(el => {
                 const label = el.querySelector('.menu-label');
-                return label && label.textContent.trim() === text;
+                return label && regex.test(label.textContent.trim());
             });
 
-            const snoozeItem = findItemByLabel('Отложено');
-            const resolveItem = findItemByLabel('Пометить как разрешено');
-            const pendingItem = findItemByLabel('Пометить как ожидающие');
+            const snoozeItem = findItemByPattern(/отложен/i);
+            const resolveItem = findItemByPattern(/разрешен/i);
+            const pendingItem = findItemByPattern(/ожидающ/i);
 
             // Это не наше меню (например всплыл подменю "Приоритет"/"Назначить метки") — пропускаем.
             if (!snoozeItem && !resolveItem && !pendingItem) return;
