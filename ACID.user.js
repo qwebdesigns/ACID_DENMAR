@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.92
+// @version      3.93
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -492,7 +492,13 @@
                 rightPanelStyle: true,
                 mskConverter: true,
                 cardsPanel: true,
-                customValue: ''
+                customValue: '',
+                contextMenuTweaks: true,
+                ticketColorClientWaitEnabled: true,
+                ticketColorAgentWaitEnabled: true,
+                ticketColorGreen: '#22c55e',
+                ticketColorRed: '#ef4444',
+                ticketColorBlue: '#0ea5e9'
             };
             this.settings = this.loadSettings();
             this.intervals = {};
@@ -669,6 +675,7 @@
         initDOM() {
             this.injectStyles();
             this.applyRightPanelClass();
+            this.applyTicketColorVars();
             this.setupObservers();
             this.startIntervalTasks();
             this.runOnLoadTasks();
@@ -682,10 +689,30 @@
             this.settings = newSettings;
             GM_setValue('acidSettings', JSON.stringify(this.settings));
             this.applyRightPanelClass();
+            this.applyTicketColorVars();
         }
 
         applyRightPanelClass() {
             document.documentElement.classList.toggle('acid-rp-style', !!this.settings.rightPanelStyle);
+        }
+
+        hexToRgba(hex, alpha) {
+            const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex || '');
+            if (!m) return `rgba(148, 163, 184, ${alpha})`;
+            const r = parseInt(m[1], 16),
+                g = parseInt(m[2], 16),
+                b = parseInt(m[3], 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        applyTicketColorVars() {
+            const root = document.documentElement;
+            root.style.setProperty('--acid-c-wait-start', this.hexToRgba(this.settings.ticketColorGreen, 0.25));
+            root.style.setProperty('--acid-c-wait-end', this.hexToRgba(this.settings.ticketColorRed, 0.25));
+            root.style.setProperty('--acid-c-agent-bg', this.hexToRgba(this.settings.ticketColorBlue, 0.1));
+            root.style.setProperty('--acid-c-agent-bar', this.hexToRgba(this.settings.ticketColorBlue, 0.6));
+            root.classList.toggle('acid-color-clientwait-off', !this.settings.ticketColorClientWaitEnabled);
+            root.classList.toggle('acid-color-agentwait-off', !this.settings.ticketColorAgentWaitEnabled);
         }
 
         injectStyles() {
@@ -696,19 +723,52 @@
                 .snow-icon { font-size: 1.5vw; }
 
                 @keyframes clientWait {
-                    0%   { width: 100%; background-color: hsla(120, 100%, 40%, 0.25); }
-                    100% { width: 0%;   background-color: hsla(0, 100%, 40%, 0.25); }
+                    0%   { width: 100%; background-color: var(--acid-c-wait-start, hsla(120, 100%, 40%, 0.25)); }
+                    100% { width: 0%;   background-color: var(--acid-c-wait-end, hsla(0, 100%, 40%, 0.25)); }
                 }
                 .t-client-wait .bg-prog { animation: clientWait 300s linear forwards; }
-                .t-client-expired .bg-prog { width: 100%; background-color: rgba(239, 68, 68, 0.25); }
+                .t-client-expired .bg-prog { width: 100%; background-color: var(--acid-c-wait-end, rgba(239, 68, 68, 0.25)); }
 
-                .t-agent-wait .bg-prog { width: 100%; background-color: rgba(14, 165, 233, 0.1); }
+                .t-agent-wait .bg-prog { width: 100%; background-color: var(--acid-c-agent-bg, rgba(14, 165, 233, 0.1)); }
                 @keyframes agentWait {
                     0%   { width: calc(100% - 2vw); }
                     100% { width: 0%; }
                 }
-                .t-agent-wait .bot-prog { display: block; background-color: rgba(14, 165, 233, 0.6); animation: agentWait 1800s linear forwards; }
+                .t-agent-wait .bot-prog { display: block; background-color: var(--acid-c-agent-bar, rgba(14, 165, 233, 0.6)); animation: agentWait 1800s linear forwards; }
                 .t-agent-expired .bg-prog { width: 100%; background-color: rgba(100, 116, 139, 0.15); }
+
+                /* переключатели цветовых индикаторов тикетов из настроек — глушим анимацию/цвет,
+                   а не убираем классы, чтобы не трогать логику featureTicketTracker() */
+                html.acid-color-clientwait-off .t-client-wait .bg-prog,
+                html.acid-color-clientwait-off .t-client-expired .bg-prog {
+                    background-color: transparent !important;
+                    animation: none !important;
+                }
+                html.acid-color-agentwait-off .t-agent-wait .bg-prog,
+                html.acid-color-agentwait-off .t-agent-wait .bot-prog {
+                    background-color: transparent !important;
+                    animation: none !important;
+                }
+
+                /* === ACID: правка нативного контекстного меню тикета (ПКМ по карточке) === */
+                .acid-cm-block { display: flex; flex-direction: column; padding: 0.35rem 0; gap: 0.35rem; }
+                .acid-cm-item {
+                    font-size: 0.85rem !important;
+                    font-weight: 600 !important;
+                    margin: 0 0.15rem;
+                }
+                .acid-cm-item.acid-cm-fake { cursor: pointer; }
+                .acid-cm-gap { height: 0.4rem; }
+                .acid-cm-confirm-row { display: none; align-items: stretch; gap: 0.4rem; margin: 0 0.15rem; }
+                .acid-cm-confirm-btn {
+                    flex: 1; display: flex; align-items: center; justify-content: center;
+                    height: 1.75rem; border-radius: 0.375rem; cursor: pointer; font-size: 0.95rem;
+                    font-weight: 700; transition: filter 0.15s ease, transform 0.1s ease;
+                }
+                .acid-cm-confirm-btn:hover { filter: brightness(1.15); }
+                .acid-cm-confirm-btn:active { transform: scale(0.96); }
+                .acid-cm-confirm-yes { background: rgba(34, 197, 94, 0.25); color: #4ade80; }
+                .acid-cm-confirm-no  { background: rgba(239, 68, 68, 0.25); color: #f87171; }
 
                 /* === ACID: правая панель — только компоновка, цвета темы не трогаем === */
 
@@ -908,6 +968,117 @@
             }
         }
 
+        // Нативное меню ПКМ по карточке тикета (Vue-компонент Chatwoot, не наш DOM) —
+        // всплывающий div.fixed.z-[9999], пересоздаётся заново при каждом открытии.
+        // Помечаем обработанный корень data-acid-cm-done, чтобы не задваивать правки
+        // при повторных срабатываниях общего MutationObserver на том же узле.
+        findConversationContextMenus() {
+            return Array.from(document.querySelectorAll('div.fixed.outline-none[tabindex="0"]'))
+                .filter(el => el.className.includes('z-[9999]') && el.dataset.acidCmDone !== '1');
+        }
+
+        featureConversationContextMenu() {
+            if (!this.settings.contextMenuTweaks) return;
+            const menus = this.findConversationContextMenus();
+            menus.forEach(menu => this.tweakConversationContextMenu(menu));
+        }
+
+        tweakConversationContextMenu(menu) {
+            const findItemByLabel = (text) => Array.from(menu.querySelectorAll('.menu')).find(el => {
+                const label = el.querySelector('.menu-label');
+                return label && label.textContent.trim() === text;
+            });
+
+            const snoozeItem = findItemByLabel('Отложено');
+            const resolveItem = findItemByLabel('Пометить как разрешено');
+            const pendingItem = findItemByLabel('Пометить как ожидающие');
+
+            // Это не наше меню (например всплыл подменю "Приоритет"/"Назначить метки") — пропускаем.
+            if (!snoozeItem && !resolveItem && !pendingItem) return;
+            menu.dataset.acidCmDone = '1';
+
+            if (snoozeItem) snoozeItem.style.display = 'none';
+
+            if (resolveItem) this.styleAcidMenuItem(resolveItem, 'Завершить', 'rgba(239, 68, 68, 0.18)', '#fca5a5');
+            if (pendingItem) this.styleAcidMenuItem(pendingItem, 'Ожидание', 'rgba(234, 179, 8, 0.18)', '#fde047');
+
+            // Сначала переносим оба пункта в общий блок с отступами (appendChild сам
+            // переносит узел из старого родителя — без риска insertBefore на узел,
+            // который ещё не является ребёнком нового родителя), и только потом
+            // навешиваем fake-подтверждение на "Завершить" — так все вставленные им
+            // узлы (fake-кнопка, ряд ✔/✖) сразу окажутся внутри block, рядом с исходным
+            // (уже спрятанным) пунктом, на его месте.
+            if (resolveItem && pendingItem) {
+                const block = document.createElement('div');
+                block.className = 'acid-cm-block';
+                resolveItem.parentNode.insertBefore(block, resolveItem);
+                block.appendChild(resolveItem);
+                const gap = document.createElement('div');
+                gap.className = 'acid-cm-gap';
+                block.appendChild(gap);
+                block.appendChild(pendingItem);
+            }
+
+            if (resolveItem) this.addFakeConfirm(resolveItem);
+        }
+
+        styleAcidMenuItem(item, label, bg, color) {
+            const labelEl = item.querySelector('.menu-label');
+            if (labelEl) {
+                labelEl.textContent = label;
+                labelEl.style.color = color;
+                labelEl.style.fontWeight = '600';
+            }
+            const icon = item.querySelector('svg');
+            if (icon) icon.style.color = color;
+            item.classList.add('acid-cm-item');
+            item.style.background = bg;
+            item.style.borderRadius = '0.375rem';
+        }
+
+        // "Завершить" — сначала показываем визуальную копию кнопки без Vue-обработчика (fake),
+        // клик по ней раскрывает мини-ряд ✔/✖. ✖ просто закрывает ряд обратно. ✔ вызывает
+        // .click() на ИСХОДНОМ (спрятанном, но не удалённом) элементе меню — у него всё ещё
+        // висит родной Vue-обработчик, так что реальное разрешение тикета происходит как обычно,
+        // без необходимости перехватывать/эмулировать логику Chatwoot.
+        addFakeConfirm(item) {
+            const fakeBtn = item.cloneNode(true);
+            fakeBtn.removeAttribute('data-acid-cm-done');
+            fakeBtn.classList.add('acid-cm-fake');
+            item.style.display = 'none';
+            item.parentNode.insertBefore(fakeBtn, item);
+
+            const confirmRow = document.createElement('div');
+            confirmRow.className = 'acid-cm-confirm-row';
+            confirmRow.innerHTML = `
+                <div class="acid-cm-confirm-btn acid-cm-confirm-yes" title="Подтвердить">✔</div>
+                <div class="acid-cm-confirm-btn acid-cm-confirm-no" title="Отмена">✖</div>
+            `;
+            item.parentNode.insertBefore(confirmRow, item.nextSibling);
+
+            const showConfirm = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                fakeBtn.style.display = 'none';
+                confirmRow.style.display = 'flex';
+            };
+            const cancelConfirm = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                confirmRow.style.display = 'none';
+                fakeBtn.style.display = '';
+            };
+            const confirmYes = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                item.click();
+            };
+
+            fakeBtn.addEventListener('click', showConfirm);
+            confirmRow.querySelector('.acid-cm-confirm-no').addEventListener('click', cancelConfirm);
+            confirmRow.querySelector('.acid-cm-confirm-yes').addEventListener('click', confirmYes);
+        }
+
         featureMenuInjector() {
             if (document.getElementById('acid-settings-btn')) return;
             const buttons = document.querySelectorAll('.n-dropdown-item button, .n-dropdown-item a');
@@ -963,6 +1134,7 @@
                 box-shadow: 0 1vh 3vh rgba(0, 0, 0, 0.4);
                 transform: scale(0.95); transition: transform 0.2s ease;
                 font-family: inherit;
+                max-height: 85vh; overflow-y: auto; box-sizing: border-box;
             `;
 
             modal.innerHTML = `
@@ -1021,6 +1193,46 @@
                         </div>
                         <input type="checkbox" id="acid-t-cards" style="display: none;" ${this.settings.cardsPanel ? 'checked' : ''}>
                     </label>
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                        <span>Кастомное меню ПКМ (тикет)</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.contextMenuTweaks ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-cm-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.contextMenuTweaks ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.contextMenuTweaks ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-cm-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-cm" style="display: none;" ${this.settings.contextMenuTweaks ? 'checked' : ''}>
+                    </label>
+
+                    <div style="height: 0.05vh; background: rgba(255,255,255,0.08); margin: 0.5vh 0;"></div>
+                    <div style="font-size: 0.75vw; color: #64748b; text-transform: uppercase; letter-spacing: 0.03em;">Цвета тикетов</div>
+
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1;">
+                        <span>Ожидание клиента (зел.→красн.)</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.ticketColorClientWaitEnabled ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-cwait-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.ticketColorClientWaitEnabled ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.ticketColorClientWaitEnabled ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-cwait-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-cwait" style="display: none;" ${this.settings.ticketColorClientWaitEnabled ? 'checked' : ''}>
+                    </label>
+                    <div style="display: flex; gap: 0.8vw; align-items: center;">
+                        <label style="display: flex; align-items: center; gap: 0.4vw; font-size: 0.8vw; color: #94a3b8; flex: 1;">
+                            Старт
+                            <input type="color" id="acid-color-green" value="${this.settings.ticketColorGreen}" style="width: 1.6vw; height: 1.6vw; border: none; border-radius: 0.3vw; background: none; padding: 0; cursor: pointer;">
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 0.4vw; font-size: 0.8vw; color: #94a3b8; flex: 1;">
+                            Финиш
+                            <input type="color" id="acid-color-red" value="${this.settings.ticketColorRed}" style="width: 1.6vw; height: 1.6vw; border: none; border-radius: 0.3vw; background: none; padding: 0; cursor: pointer;">
+                        </label>
+                    </div>
+
+                    <label style="display: flex; justify-content: space-between; align-items: center; cursor: pointer; font-size: 0.9vw; color: #cbd5e1; margin-top: 0.5vh;">
+                        <span>Ожидание ответа клиента агентом (синий)</span>
+                        <div style="position: relative; width: 2.5vw; height: 1.2vw; background: ${this.settings.ticketColorAgentWaitEnabled ? '#b3e600' : 'rgba(255,255,255,0.1)'}; border-radius: 1vw; transition: 0.3s;" id="acid-t-await-bg">
+                            <div style="position: absolute; top: 0.15vw; left: ${this.settings.ticketColorAgentWaitEnabled ? '1.45vw' : '0.15vw'}; width: 0.9vw; height: 0.9vw; background: ${this.settings.ticketColorAgentWaitEnabled ? '#111827' : '#94a3b8'}; border-radius: 50%; transition: 0.3s;" id="acid-t-await-dot"></div>
+                        </div>
+                        <input type="checkbox" id="acid-t-await" style="display: none;" ${this.settings.ticketColorAgentWaitEnabled ? 'checked' : ''}>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.4vw; font-size: 0.8vw; color: #94a3b8;">
+                        Цвет
+                        <input type="color" id="acid-color-blue" value="${this.settings.ticketColorBlue}" style="width: 1.6vw; height: 1.6vw; border: none; border-radius: 0.3vw; background: none; padding: 0; cursor: pointer;">
+                    </label>
                 </div>
                 <button id="acid-save-btn" style="
                     width: 100%; margin-top: 3vh; padding: 1vh; background: #b3e600; color: #111827;
@@ -1054,6 +1266,9 @@
             bindToggle('acid-t-rp', 'acid-t-rp-bg', 'acid-t-rp-dot');
             bindToggle('acid-t-msk', 'acid-t-msk-bg', 'acid-t-msk-dot');
             bindToggle('acid-t-cards', 'acid-t-cards-bg', 'acid-t-cards-dot');
+            bindToggle('acid-t-cm', 'acid-t-cm-bg', 'acid-t-cm-dot');
+            bindToggle('acid-t-cwait', 'acid-t-cwait-bg', 'acid-t-cwait-dot');
+            bindToggle('acid-t-await', 'acid-t-await-bg', 'acid-t-await-dot');
 
             const closeModal = () => {
                 overlay.style.opacity = '0';
@@ -1071,6 +1286,12 @@
                     rightPanelStyle: document.getElementById('acid-t-rp').checked,
                     mskConverter: document.getElementById('acid-t-msk').checked,
                     cardsPanel: document.getElementById('acid-t-cards').checked,
+                    contextMenuTweaks: document.getElementById('acid-t-cm').checked,
+                    ticketColorClientWaitEnabled: document.getElementById('acid-t-cwait').checked,
+                    ticketColorAgentWaitEnabled: document.getElementById('acid-t-await').checked,
+                    ticketColorGreen: document.getElementById('acid-color-green').value,
+                    ticketColorRed: document.getElementById('acid-color-red').value,
+                    ticketColorBlue: document.getElementById('acid-color-blue').value,
                     customValue: document.getElementById('acid-text-val').value || ''
                 });
 
@@ -1624,10 +1845,42 @@
                 this.featureMenuInjector();
                 this.featureAddressPanel();
                 this.renderHeaderUI();
+                this.featureConversationContextMenu();
+                this.ensureTicketListObserver();
             });
             this.observers.menu.observe(document.body, {
                 childList: true,
                 subtree: true
+            });
+        }
+
+        // Список тикетов — vue-recycle-scroller: при скролле/переключении он переиспользует
+        // те же DOM-узлы, патча их текст/атрибуты на месте (без childList-мутаций), поэтому
+        // общий observer выше (childList-only) эти изменения не ловит — цвета обновлялись
+        // только раз в секунду по интервалу, отсюда заметная задержка/мигание при
+        // переключении тикетов. Отдельный observer на самом скроллере, слушающий ещё и
+        // атрибуты/текст, ловит переиспользование карточки сразу и пересчитывает цвета
+        // без ожидания следующего тика интервала (тот остаётся лишь как подстраховка).
+        ensureTicketListObserver() {
+            const scroller = document.querySelector('.vue-recycle-scroller');
+            if (!scroller || scroller.dataset.acidObserved === '1') return;
+            scroller.dataset.acidObserved = '1';
+            this.observers.ticketList = new MutationObserver(() => this.scheduleTicketTrackerUpdate());
+            this.observers.ticketList.observe(scroller, {
+                childList: true,
+                subtree: true,
+                attributes: true,
+                attributeFilter: ['style', 'class', 'data-state-hash'],
+                characterData: true
+            });
+        }
+
+        scheduleTicketTrackerUpdate() {
+            if (this._ticketTrackerScheduled) return;
+            this._ticketTrackerScheduled = true;
+            requestAnimationFrame(() => {
+                this._ticketTrackerScheduled = false;
+                this.featureTicketTracker();
             });
         }
 
