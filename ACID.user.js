@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      3.94
+// @version      4.00
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -517,7 +517,7 @@
                     favorite: true,
                     aliases: ["singapore", "sg", "сингапур"],
                     names: ["Wei", "Jian", "Sarah", "Michael", "Chloe", "David", "Xin", "Lucas", "Emma", "Jun", "Ming", "Li", "Yan", "Hong", "Feng", "Ryan", "Rachel", "Ethan", "Grace", "Noah", "Olivia", "Matthew", "Sophia", "Benjamin", "Isabella", "Ahmad", "Siti", "Priya", "Arjun", "Wen", "Kai", "Jing", "Heai", "Xuan", "Zhi", "Yong", "Hwee", "Choon", "Wan", "Hafiz", "Aisyah", "Nur", "Farah", "Zulkifli", "Rashid", "Kumar", "Raj", "Meera", "Deepa", "Karthik", "Vikram", "Anand", "James", "Daniel", "Nicole", "Amanda", "Jasmine"],
-                    surnames: ["Tan", "Lim", "Lee", "Ng", "Ong", "Wong", "Goh", "Chua", "Chan", "Koh", "Teo", "Yeo", "Loh", "Sim", "Wee", "Foo", "Yap", "Heng", "Low", "Chew", "Pang", "Seet", "Kee", "Ho", "Liang", "Phua", "Tay", "Yip", "Lam", "Kwan", "Neo", "Toh", "Poh", "Boon", "Soh", "Ang", "Cheong", "Quek", "Aw", "Ling"]
+                    surnames: ["Tan", "Lim", "Lee", "Ng", "Ong", "Wong", "Goh", "Chua", "Chan", "Koh", "Teo", "Yeo", "Lohn", "Sim", "Wee", "Foo", "Yap", "Heng", "Low", "Chew", "Pang", "Seet", "Kee", "Ho", "Liang", "Phua", "Tay", "Yip", "Lam", "Kwan", "Neo", "Toh", "Poh", "Boon", "Soh", "Ang", "Cheong", "Quek", "Aw", "Ling"]
                 },
                 "HK": {
                     name: "Hong Kong",
@@ -655,7 +655,7 @@
                 }
             };
             // База адресного сервера (см. server/ в репозитории). Меняй только тут, если переносишь хостинг.
-            this.ADDRESS_SERVER_BASE = "https://gammahub.tech/acid";
+            this.ADDRESS_SERVER_BASE = "https://meowtech.bid/acid";
             this.currentAddress = null;
             this.selectedRegionCode = "SG";
             this.prefetchStarted = false;
@@ -1508,7 +1508,7 @@
         }
 
         // Оборачивает GM_xmlhttpRequest в промис. Используем GM_xmlhttpRequest, а не fetch(),
-        // потому что адресный сервер живёт на своём домене (gammahub.tech), а не на cw.echelon.su —
+        // потому что адресный сервер живёт на своём домене (meowtech.bid), а не на cw.echelon.su —
         // GM_xmlhttpRequest у Tampermonkey игнорирует CORS, обычный fetch() тут бы просто упал.
         gmGetJson(url) {
             return new Promise((resolve, reject) => {
