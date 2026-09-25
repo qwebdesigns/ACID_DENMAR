@@ -1,14 +1,14 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      4.00
+// @version      4.01
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
-// @match        *://cw.echelon.su/*
-// @match        *://cw2.echelon.su/*
-// @match        *://echelon.su/api/dashboard/*
-// @match        *://adm2.echelon.su/*
+// @match        *://cw.echelon.ink/*
+// @match        *://cw2.echelon.ink/*
+// @match        *://echelon.ink/api/dashboard/*
+// @match        *://adm2.echelon.ink/*
 // @updateURL    https://openuserjs.org/meta/Denmar/ACID_CW_PERKS.meta.js
 // @downloadURL  https://openuserjs.org/install/Denmar/ACID_CW_PERKS.user.js
 // @grant        GM_getValue
@@ -27,7 +27,7 @@
 (function () {
     'use strict';
 
-    // Айфрейм "Рабочая панель" (adm2.echelon.su) — отдельный документ, чужой origin,
+    // Айфрейм "Рабочая панель" (adm2.echelon.ink) — отдельный документ, чужой origin,
     // поэтому это не метод AcidPerks, а самостоятельный скрипт, выполняющийся прямо внутри
     // самого iframe. Chatwoot не пересоздаёт iframe при переключении вкладок "Сообщения" /
     // "Рабочая панель", а только показывает/прячет его через CSS — значит наблюдатель,
@@ -92,7 +92,7 @@
         }
     }
 
-    // Вкладка "Профиль" рабочей панели (adm2.echelon.su) рендерит карты клиента как
+    // Вкладка "Профиль" рабочей панели (adm2.echelon.ink) рендерит карты клиента как
     // унылые строки на всю ширину. Мы перехватываем ответ её собственного XHR/fetch
     // на /api/dashboard/profile/cards (тот же приём, что уже даёт данные тикета) и
     // поверх существующих React-строк рисуем свою карточку. Сами строки-элементы не
@@ -460,8 +460,8 @@
     }
 
     // Настройки хранятся через GM_setValue/GM_getValue, а не localStorage: последний
-    // изолирован по origin, и adm2.echelon.su (другой домен, где живёт iframe) не увидел бы
-    // localStorage, записанный на cw.echelon.su. GM-хранилище общее для всего скрипта.
+    // изолирован по origin, и adm2.echelon.ink (другой домен, где живёт iframe) не увидел бы
+    // localStorage, записанный на cw.echelon.ink. GM-хранилище общее для всего скрипта.
     function loadSharedSettings(defaults) {
         let parsed = {};
         try {
@@ -473,7 +473,7 @@
         };
     }
 
-    if (location.hostname === 'adm2.echelon.su') {
+    if (location.hostname === 'adm2.echelon.ink') {
         const settings = loadSharedSettings({
             mskConverter: true,
             cardsPanel: true
@@ -1508,7 +1508,7 @@
         }
 
         // Оборачивает GM_xmlhttpRequest в промис. Используем GM_xmlhttpRequest, а не fetch(),
-        // потому что адресный сервер живёт на своём домене (meowtech.bid), а не на cw.echelon.su —
+        // потому что адресный сервер живёт на своём домене (meowtech.bid), а не на cw.echelon.ink —
         // GM_xmlhttpRequest у Tampermonkey игнорирует CORS, обычный fetch() тут бы просто упал.
         gmGetJson(url) {
             return new Promise((resolve, reject) => {
