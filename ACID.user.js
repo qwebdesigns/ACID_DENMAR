@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         ACID CW PERKS
 // @namespace    http://tampermonkey.net/
-// @version      4.01
+// @version      4.02
 // @description  CWP ACID perks with OOP, Settings and Ticket Tracker1
 // @author       Denmar
 // @license      MIT
@@ -106,10 +106,12 @@
         // product_id -> цена продукта в $. API этого не возвращает, список известных id
         // поддерживается вручную по мере появления новых продуктов.
         const PRODUCT_PRICES = {
-            6: [8, "Стандартная"],
-            12: [15, "Эстонская"],
-            15: [30, "Эплпей Сингапур"],
-            4: [30, "Эплпей Гонконг"],
+            6: [19, "Стандартная СТАРАЯ"],
+            12: [15, "Эстонская СНЯТА"],
+            15: [30, "Эплпей Сингапур СТАРАЯ"],
+            4: [30, "Эплпей Гонконг СТАРАЯ"],
+            17: [30, "Эплпей США (бин Сингапура) НОВАЯ"],
+            18: [19, "Стандартная НОВАЯ"],
         };
 
         function productLabel(productId) {
